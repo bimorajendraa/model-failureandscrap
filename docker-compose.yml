@@ -1,0 +1,44 @@
+# Menjalankan API + dashboard secara reproducible.
+#
+#     docker compose up --build
+#
+#     API        http://localhost:8000/docs
+#     Dashboard  http://localhost:8501
+#
+# Database TIDAK ikut di sini: yang dipakai adalah PostgreSQL yang sudah ada,
+# dan aplikasi ini hanya membacanya. Kredensialnya diambil dari .env di host
+# dan tidak pernah masuk ke dalam image.
+
+services:
+  api:
+    build: .
+    image: production-ml:latest
+    env_file: .env
+    ports:
+      - "8000:8000"
+    # Di Linux, database yang jalan di host dijangkau lewat nama ini.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  dashboard:
+    build: .
+    image: production-ml:latest
+    env_file: .env
+    environment:
+      # Dashboard bicara ke API lewat jaringan compose - tidak pernah ke
+      # database, dan tidak perlu tahu kredensialnya.
+      API_BASE_URL: http://api:8000
+    command:
+      - streamlit
+      - run
+      - dashboard/app.py
+      - --server.port=8501
+      - --server.address=0.0.0.0
+      - --server.headless=true
+      - --browser.gatherUsageStats=false
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    restart: unless-stopped

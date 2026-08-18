@@ -1,9 +1,10 @@
 # production_ml
 
 Versi minimal dan siap pakai dari pipeline prediksi PART: **training,
-retraining, dan prediction**. Tidak ada notebook, EDA, profiling, visualisasi,
-ablation study, atau eksperimen di sini - semua itu tetap di
-`db_om_preparation/` sebagai referensi research.
+retraining, prediction**, serta lapisan serving berupa **REST API dan
+dashboard**. Tidak ada notebook, EDA, profiling, visualisasi, ablation study,
+atau eksperimen di sini - semua itu tetap di `db_om_preparation/` sebagai
+referensi research.
 
 Database **hanya dibaca**. Folder ini tidak pernah membuat, mengubah, atau
 menghapus object apa pun di database, dan tidak bergantung pada schema
@@ -121,6 +122,411 @@ benar-benar mati dalam 30 hari - baca peringatannya di bagian "Model scrap".
 
 ---
 
+## Aplikasi serving: API + dashboard
+
+Kedua model di atas dibungkus menjadi aplikasi predictive maintenance
+sederhana. **Tidak ada satu pun perhitungan model yang dipindah atau ditulis
+ulang di lapisan ini** - seluruh fitur dan probabilitas tetap dihitung
+`feature_builder.py`, `predict.py`, dan `predict_scrap.py`.
+
+### Arsitektur
+
+```
+PostgreSQL  (read-only)
+     |
+     v
+data_reader.py  -> feature_builder.py / scrap_features.py
+     |
+     v
+predict.py / predict_scrap.py            <- ML core, tidak diubah
+     |
+     v
+api/services/    prediction_service, batch_service, recommendation_service
+     |
+     v
+api/routes/      FastAPI
+     |
+     v
+dashboard/       Streamlit
+```
+
+Aturannya satu arah: **dashboard tidak pernah menyentuh database maupun
+memuat model**. Semua angka yang tampil di layar datang lewat HTTP dari API,
+sehingga ambang risiko, aturan rekomendasi, dan kredensial database hanya ada
+di satu tempat.
+
+Pemanggil cukup mengirim `item_id`. Fitur ML - umur pemasangan, riwayat
+kerusakan, corrective maintenance, client, lokasi, kondisi armada - dibangun
+sendiri oleh ML core dan **tidak boleh** dikirim dari luar.
+
+### Pemasangan
+
+```bash
+pip install -r requirements-serving.txt   # sudah termasuk requirements.txt
+cp .env.example .env                      # lalu isi kredensial database
+```
+
+`requirements.txt` sengaja dibiarkan hanya berisi kebutuhan training, supaya
+mesin yang hanya melatih model tidak perlu memasang FastAPI dan Streamlit.
+
+### Environment variable
+
+Semuanya dibaca dari `.env` (yang sudah masuk `.gitignore`) atau environment.
+Tidak ada kredensial yang boleh ditulis di dalam kode atau image.
+
+| Variabel | Bawaan | Keterangan |
+|---|---|---|
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | - | wajib; sesi database dipaksa read-only |
+| `DB_SSLMODE` | `prefer` | |
+| `BATCH_CACHE_TTL_SECONDS` | `3600` | umur hasil batch scoring sebelum dihitung ulang |
+| `WARMUP_BATCH_ON_STARTUP` | `false` | hitung batch saat start, bukan saat request pertama |
+| `DEFAULT_RECOMMENDATION_LIMIT` | `50` | |
+| `MAX_RECOMMENDATION_LIMIT` | `500` | batas atas `?limit=` |
+| `DATA_FRESHNESS_TTL_SECONDS` | `60` | seberapa cepat data baru terlihat aplikasi |
+| `CORS_ALLOW_ORIGINS` | kosong | origin frontend browser, dipisah koma |
+| `GEOCODE_BUDGET_SECONDS_DEFAULT` | `60` | anggaran waktu geocoding lokasi per panggilan `/api/v1/locations/map` |
+| `GEOCODE_BUDGET_SECONDS_MAX` | `90` | batas atas anggaran, apa pun yang diminta lewat query param |
+| `API_BASE_URL` | `http://127.0.0.1:8000` | dipakai dashboard untuk menemukan API |
+
+### Menjalankan API
+
+```bash
+uvicorn api.main:app --reload
+```
+
+Dokumentasi interaktif: <http://127.0.0.1:8000/docs>
+
+### Endpoint
+
+| Endpoint | Kegunaan |
+|---|---|
+| `GET /health` | status aplikasi, versi model, kesegaran cache batch. `?check_database=true` untuk ikut menguji koneksi database |
+| `GET /api/v1/model` | versi, target, fitur, ambang risiko, dan metrik uji kedua model |
+| `GET /api/v1/parts/{item_id}/failure` | peluang rusak 30/60/90/120 hari |
+| `GET /api/v1/parts/{item_id}/scrap` | peluang tidak bisa diperbaiki **jika** rusak |
+| `GET /api/v1/parts/{item_id}/assessment` | gabungan keduanya + rekomendasi + faktor risiko |
+| `GET /api/v1/parts/{item_id}/history` | tanggal kerusakan dan lokasi yang pernah tercatat, dari event mentah |
+| `GET /api/v1/recommendations` | daftar prioritas hasil batch scoring |
+| `GET /api/v1/overview` | angka ringkas armada + daftar teratas |
+| `GET /api/v1/filters` | nilai filter yang benar-benar ada di data |
+| `GET /api/v1/locations/map` | sebaran risiko per lokasi + koordinat (kalau ada) |
+
+```bash
+curl http://127.0.0.1:8000/api/v1/parts/011201100101164/assessment
+```
+
+```json
+{
+  "item_id": "011201100101164",
+  "status": "SCORED",
+  "as_of": "2026-08-03 11:07:22",
+  "failure": {
+    "failure_probability_30d": 0.0494,
+    "failure_probability_60d": 0.0964,
+    "failure_probability_90d": 0.141,
+    "failure_probability_120d": 0.1835,
+    "risk_level": "LOW",
+    "model_version": "v1"
+  },
+  "scrap": {
+    "scrap_probability": 0.0259,
+    "scrap_risk_level": "LOW",
+    "item_type": "MOTOR",
+    "model_version": "v1"
+  },
+  "death_probability_30d": 0.00128,
+  "recommendation": {
+    "priority": "LOW",
+    "action": "MONITOR",
+    "message": "Risiko kerusakan rendah. Cukup dipantau."
+  },
+  "model_version": {"failure": "v1", "scrap": "v1"}
+}
+```
+
+Daftar prioritas:
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/recommendations?risk=HIGH&limit=50"
+```
+
+Filter yang tersedia: `search` (cocok sebagian ID PART), `risk`, `priority`,
+`item_type`, `client`, `location`, `replacement_candidates_only`, `limit`,
+`offset`.
+
+Dipakai dari browser (React/Vue dan sejenisnya) perlu `CORS_ALLOW_ORIGINS`
+diisi lebih dulu; default-nya tertutup, dan origin harus disebut eksplisit
+alih-alih dibuka untuk semua. Streamlit tidak memerlukannya karena
+panggilannya server-ke-server.
+
+### Tiga jawaban yang harus dibedakan
+
+| Keadaan | Jawaban |
+|---|---|
+| PART tidak ada di database | `404` + `{"status": "NOT_FOUND"}` |
+| PART ada tetapi tidak bisa diskor | `200` + `{"status": "NOT_SCORABLE", "reason": ...}` |
+| Database tidak bisa dibaca | `503` + pesan umum |
+
+PART yang tidak bisa diskor **bukan** kegagalan sistem: PART yang sedang
+tidak terpasang memang tidak punya risiko kerusakan yang perlu diperkirakan.
+Data yang tidak ada tidak pernah diganti nilai karangan hanya supaya prediksi
+tetap keluar. Client tidak pernah menerima DSN, kredensial, SQL, atau stack
+trace - detail lengkapnya hanya masuk log server.
+
+### Alur satu prediksi
+
+```
+GET /api/v1/parts/{item_id}/assessment
+        |
+        v
+prediction_service.get_part_assessment(item_id)
+        |
+        +--> predict.predict(item_id)            risiko kerusakan 30/60/90/120 hari
+        +--> predict_scrap.predict_scrap(item_id)  risiko scrap (bersyarat)
+        +--> recommendation_service.recommend(...) tindakan operasional
+        +--> explanation.risk_factors(...)         faktor risiko dari fitur
+```
+
+### Logic rekomendasi
+
+Recommendation engine (`api/services/recommendation_service.py`) **tidak punya
+ambang sendiri**. Masukannya hanya kelompok risiko yang sudah ditetapkan
+model - ambang angkanya berasal dari kapasitas kerja tim yang dibekukan saat
+training (`FAILURE_CAPACITY_PER_MONTH`, `SCRAP_CAPACITY_PER_MONTH` di
+`config.py`). Isinya satu tabel keputusan supaya seluruh aturan terlihat
+sekaligus dan mudah diganti.
+
+| Risiko kerusakan | Risiko scrap | Prioritas | Tindakan |
+|---|---|---|---|
+| HIGH | HIGH | CRITICAL | `INSPECT_AND_PREPARE_REPLACEMENT` |
+| HIGH | MEDIUM / LOW | HIGH | `PRIORITIZE_INSPECTION` |
+| MEDIUM | HIGH | MEDIUM | `SCHEDULE_INSPECTION_AND_REVIEW_STOCK` |
+| MEDIUM | MEDIUM / LOW | MEDIUM | `SCHEDULE_INSPECTION` |
+| LOW | apa pun | LOW | `MONITOR` |
+
+Risiko scrap **tidak pernah menaikkan prioritas sendirian**. Angkanya
+bersyarat terhadap kerusakan, jadi PART yang kecil kemungkinannya rusak tidak
+menjadi mendesak hanya karena seandainya rusak sulit diperbaiki - yang berubah
+hanya perlu-tidaknya menyiapkan pengganti.
+
+PART yang risiko kerusakannya MEDIUM/HIGH **dan** risiko scrap-nya HIGH
+ditandai `replacement_candidate`. Itu bukan vonis bahwa PART akan dibuang,
+melainkan penanda bahwa menyiapkan pengganti lebih awal masuk akal.
+
+### Batch scoring
+
+Dashboard bertanya "PART mana yang paling perlu diperhatikan", bukan "berapa
+risiko PART X". Memanggil `predict()` belasan ribu kali berarti belasan ribu
+kali query database, jadi `api/services/batch_service.py` membaca seluruh data
+sekali lalu menjalankan model pada semua baris sekaligus:
+
+```
+ambil siklus + event (2 query)
+        |
+        v
+current_observations -> attach_history -> attach_fleet_snapshot
+        |
+        v
+project_features per langkah 30 hari -> predict_proba seluruh baris
+        |
+        v
+kelompok risiko -> rekomendasi -> urutkan menurut prioritas
+```
+
+Sekitar **16.900 PART aktif dalam ~35 detik**; hasilnya di-cache
+(`BATCH_CACHE_TTL_SECONDS`), jadi permintaan filter dan paging berikutnya
+dilayani dalam hitungan milidetik tanpa menghitung ulang.
+
+**Kesetaraan single vs batch dijaga test.** Keduanya memanggil fungsi
+`feature_builder` dan model yang sama, sehingga hasilnya wajib identik - bukan
+sekadar mirip. `tests/test_parity.py` membandingkan probabilitas keempat
+horizon, kelompok risiko, dan probabilitas scrap secara persis, dan memeriksa
+bahwa populasi yang diskor batch sama dengan populasi yang dipakai `train.py`
+saat menyetel ambang HIGH (16.877 PART, 200 di antaranya HIGH).
+
+Satu-satunya bagian yang ditulis ulang untuk batch adalah penyusunan kolom
+mentah scrap (`scrap_features.current_state()` hanya melayani satu PART per
+panggilan); test membandingkannya kolom per kolom dengan fungsi aslinya.
+
+### Menjalankan dashboard
+
+API harus sudah jalan lebih dulu.
+
+```bash
+streamlit run dashboard/app.py
+```
+
+<http://localhost:8501> - empat halaman:
+
+| Halaman | Isi |
+|---|---|
+| **Overview** | jumlah PART aktif, risiko tinggi/sedang, kandidat penggantian, daftar teratas |
+| **Prioritas Perawatan** | seluruh PART aktif dengan filter risiko / jenis / client / lokasi |
+| **Detail PART** | cari `item_id`: risiko 30/60/90/120 hari, risiko scrap, rekomendasi, faktor risiko, versi model |
+| **Perencanaan Penggantian** | PART yang risiko rusak dan risiko scrap-nya sama-sama tinggi |
+| **Peta Risiko** | sebaran lokasi PART aktif menurut risiko, dengan koordinat hasil geocoding |
+
+Klik satu baris di tabel manapun untuk memilihnya, lalu tombol "Lihat detail"
+muncul dan membawa ke halaman Detail PART - tanpa mengetik ulang ID.
+
+Di halaman Detail PART, faktor risiko yang berupa hitungan ("2 kerusakan
+tercatat dalam 365 hari terakhir") bisa dibuka lebih lanjut lewat dua tabel:
+tanggal setiap kerusakan, dan riwayat lokasi (kapan pertama/terakhir tercatat
+di tiap tempat) - keduanya dari event mentah, bukan hitungan ulang.
+
+Tampilan selalu menyebut **peluang dalam jangka waktu** ("Rusak dalam 30 hari:
+4,9%"), tidak pernah tanggal kerusakan - model memang tidak memperkirakan
+tanggal.
+
+### Faktor risiko (explanation)
+
+Halaman detail menampilkan kondisi nyata PART yang menjadi masukan model -
+riwayat kerusakan setahun terakhir, corrective maintenance, umur pemasangan,
+kondisi armada model PART yang sama, rata-rata umur siklus sebelumnya,
+perpindahan lokasi. Seluruhnya dibaca dari kolom yang benar-benar dihitung
+`feature_builder.py`; tidak ada alasan yang dikarang.
+
+Yang **tidak** diklaim: seberapa besar satu faktor menaikkan skor. Untuk itu
+perlu analisis kontribusi per-fitur (SHAP), dan itu pekerjaan tahap
+berikutnya. Setiap jawaban API membawa catatan ini apa adanya.
+
+### Kesegaran data
+
+Dua hal bisa membuat aplikasi diam-diam menyajikan angka lama, dan keduanya
+ditutup oleh `api/services/data_state.py`:
+
+1. **Potret kondisi armada.** `predict.py` menyimpannya di variabel
+   level-modul dan mengembalikannya tanpa memeriksa ulang batas waktu data -
+   benar untuk proses CLI yang hidup beberapa detik, tetapi di server yang
+   hidup berhari-hari membuat 3 fitur armada BEKU sementara 18 fitur lain ikut
+   segar. Tidak ada error, prediksi tetap keluar, hanya angkanya yang keliru.
+2. **Cache batch scoring**, yang semula hanya kedaluwarsa karena umur.
+
+Batas waktu data diperiksa berkala (`DATA_FRESHNESS_TTL_SECONDS`). Begitu
+terbukti bergeser, potret armada dibuang supaya ML core membangunnya ulang
+dengan pemeriksaannya sendiri, dan hasil batch ditandai basi. `predict.py`
+tidak diubah sama sekali - penutupannya dilakukan dari luar.
+
+### Satu request, satu kali baca
+
+Menilai satu PART memanggil `predict()` dan `predict_scrap()`, dan keduanya
+membaca hal yang sama dengan argumen yang sama: batas waktu data, siklus, dan
+event PART itu. Semula setiap panggilan membuka koneksi sendiri - **9 koneksi,
+9 detik** untuk satu endpoint assessment.
+
+`api/services/query_cache.py` menyatukannya: selama satu request, pembacaan
+dengan argumen yang sama dijawab dari hasil pertama. Hasilnya **3 koneksi, 4,8
+detik**, dengan angka prediksi yang persis sama.
+
+Cache-nya hanya hidup di dalam `request_scope()` dan hanya untuk thread itu -
+di luar scope fungsi aslinya dipanggil apa adanya, jadi `train.py` dan
+`python predict.py` dari terminal tidak terpengaruh sama sekali.
+
+Halaman detail juga memakai fitur yang sudah dihitung batch kalau tersedia,
+sehingga faktor risiko tidak perlu membaca database lagi. Kalau batch belum
+pernah jalan, snapshot-nya dibangun untuk satu PART saja - menjelaskan satu
+PART tidak pernah memaksa seluruh armada diskor.
+
+### Peta lokasi: geocoding tanpa menebak koordinat
+
+Database ini hanya menyimpan NAMA lokasi ("STASIUN JUANDA"), bukan koordinat
+GPS. `api/services/geocoding_service.py` mencarinya lewat OpenStreetMap
+Nominatim, tetapi disaring ketat karena geocoding polos terbukti berbahaya:
+dicoba langsung pada 153 nama lokasi asli di data, "SERVICE CENTER" (nama
+gudang servis internal) memang ketemu hasil - tapi nyangkut ke gerai retail
+yang sama sekali tidak terkait, hanya karena kebetulan berada di area yang
+sama. **Pin yang salah tempat lebih menyesatkan daripada tidak ada pin sama
+sekali** untuk keputusan operasional.
+
+Dua lapis penyaringan menutup celah itu:
+
+1. **Sebelum dikirim ke Nominatim** - hanya nama berpola stasiun kereta
+   publik ("STASIUN ..." atau "... (KA BANDARA)") yang dicoba. Dari 153
+   lokasi di data, 148 berpola itu; sisanya (nama fasilitas internal seperti
+   "GUDANG NI", "SERVICE CENTER", "DIPO DEPOK", atau salah ketik seperti
+   "SRASIUN RAWA BUAYA") tidak pernah dikirim ke jaringan sama sekali -
+   bukan sekadar hasilnya dibuang, supaya tidak ada peluang kebetulan ketemu
+   tempat yang salah.
+2. **Sesudah hasil kembali** - koordinatnya harus jatuh di dalam kotak
+   Jabodetabek. Bukan angka yang dikarang: seluruh client yang tercatat di
+   data (KCI, LRT Jabodebek, Railink bandara) beroperasi di situ, jadi
+   kotak ini adalah batas yang didukung data itu sendiri.
+
+Lokasi yang tidak lolos TIDAK ditampilkan sebagai pin - dilaporkan terpisah
+di halaman Peta Risiko, tetap diurutkan menurut risiko, supaya PART berisiko
+tinggi di lokasi itu tidak hilang dari pandangan hanya karena belum ada
+koordinatnya.
+
+Hasilnya di-cache di `.cache/geocode.json` (tidak masuk git, regenerable):
+nama lokasi tidak berubah dari hari ke hari, jadi tidak digeocode ulang
+setiap kali peta dibuka. Mematuhi kebijakan pemakaian Nominatim (User-Agent
+deskriptif, maksimum 1 permintaan/detik); satu panggilan `/api/v1/locations/map`
+dibatasi anggaran waktu (`GEOCODE_BUDGET_SECONDS_DEFAULT`) supaya tidak
+menggantung lama - lokasi yang belum sempat dicoba diselesaikan pada
+panggilan berikutnya, tombol "Coba cari koordinat lagi" di dashboard memicu
+percobaan lanjutan itu.
+
+### Versi model
+
+Lapisan serving mengikuti mekanisme versi yang sudah ada - `models/failure/CURRENT`
+dan `models/scrap/CURRENT` - dan tidak punya mekanisme sendiri. Model dimuat
+**sekali saat aplikasi start**, lalu dipakai ulang; tidak ada model yang
+dimuat per request. Versinya ikut di setiap jawaban (`model_version`), di
+`/health`, dan di sidebar dashboard, supaya tidak ada angka yang terbaca tanpa
+diketahui berasal dari model mana.
+
+Untuk memakai model baru: latih (`python train.py`), lalu **restart** API.
+
+### Training tetap terpisah dari inference
+
+Tidak ada endpoint `POST /train` dan memang tidak akan ada. Training dijalankan
+dari terminal, hasilnya dievaluasi, dan model baru hanya dipromosikan kalau
+tidak lebih buruk pada data uji.
+
+```
+TRAINING                          INFERENCE
+database                          database
+   |                                 |
+   v                                 v
+train.py / train_scrap.py         model CURRENT
+   |                                 |
+   v                                 v
+evaluasi -> models/vN -> CURRENT  FastAPI -> dashboard
+```
+
+### Test
+
+```bash
+pytest                       # seluruhnya (~2,5 menit, menyentuh database)
+pytest tests/test_recommendation.py   # logic murni, tanpa database
+```
+
+Yang diuji: health, prediksi kerusakan/scrap satu PART, assessment gabungan,
+PART tidak ditemukan (404), PART tidak bisa diskor, logic rekomendasi, batch
+scoring, filter/pencarian/paging, CORS, tidak adanya endpoint training,
+kesegaran data (potret armada basi dan cache batch), jumlah pembacaan
+database per request, keempat halaman dashboard yang benar-benar dirender,
+serta - yang terpenting - **kesetaraan single vs batch**.
+
+Test yang butuh database di-skip (bukan gagal) kalau database atau model tidak
+tersedia. Di CI itu berbahaya: hasilnya terbaca "semua lulus" padahal tidak
+ada yang diuji. Set `REQUIRE_DATABASE=1` supaya ketidaktersediaan menjadi
+kegagalan.
+
+### Docker
+
+```bash
+docker compose up --build
+```
+
+API di `localhost:8000`, dashboard di `localhost:8501`. Satu image dipakai
+dua kali dengan perintah start berbeda - kodenya sama persis, jadi tidak ada
+yang perlu dijaga sinkron. Database **tidak** ikut di-container: yang dipakai
+adalah PostgreSQL yang sudah ada, kredensialnya dibaca dari `.env` di host dan
+tidak pernah masuk ke dalam image.
+
+---
+
 ## Struktur
 
 ```
@@ -133,6 +539,19 @@ production_ml/
 ├── train_scrap.py      # latih model scrap
 ├── predict.py          # predict(item_id)
 ├── predict_scrap.py    # predict_scrap(item_id), predict_death_risk(item_id)
+├── api/                # lapisan serving - TIDAK menghitung model apa pun
+│   ├── main.py         # aplikasi FastAPI + penanganan kesalahan
+│   ├── schemas.py      # bentuk request/response
+│   ├── settings.py     # pengaturan server (bukan konstanta model)
+│   ├── errors.py       # tidak-ditemukan vs tidak-bisa-diskor
+│   ├── routes/         # health, model, prediction, recommendations
+│   └── services/       # prediction, batch, recommendation, explanation
+├── dashboard/          # Streamlit; hanya bicara ke API
+│   ├── app.py          # Overview
+│   └── pages/          # Prioritas, Detail PART, Perencanaan Penggantian
+├── tests/
+├── Dockerfile
+├── docker-compose.yml
 ├── models/
 │   ├── failure/        # model KERUSAKAN
 │   │   ├── CURRENT     # versi yang dipakai production
@@ -140,7 +559,8 @@ production_ml/
 │   └── scrap/          # model SCRAP
 │       ├── CURRENT
 │       └── v1/         # model.joblib, metadata.json
-├── requirements.txt
+├── requirements.txt          # kebutuhan training
+├── requirements-serving.txt  # + FastAPI, Streamlit, test
 └── README.md
 ```
 
