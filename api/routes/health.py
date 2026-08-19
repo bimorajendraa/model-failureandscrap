@@ -5,9 +5,10 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 import data_reader
+from api import db_pool
 from api.errors import ModelUnavailable
 from api.schemas import HealthResponse
-from api.services import batch_service, db_pool, model_registry
+from api.services import batch_service, model_registry
 
 router = APIRouter(tags=["health"])
 

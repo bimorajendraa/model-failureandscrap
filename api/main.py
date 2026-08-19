@@ -23,7 +23,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api import logging_config, settings
+from api import db_pool, logging_config, settings
 from api.errors import (
     DataSourceUnavailable,
     ModelUnavailable,
@@ -31,7 +31,7 @@ from api.errors import (
     PartNotScorable,
 )
 from api.routes import health, locations, model_info, monitoring, prediction, recommendations
-from api.services import batch_service, db_pool, model_registry
+from api.services import batch_service, model_registry
 
 logging_config.setup()
 logger = logging.getLogger("production_ml.api")

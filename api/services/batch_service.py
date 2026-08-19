@@ -37,9 +37,9 @@ import feature_builder
 import predict as failure_model
 import predict_scrap as scrap_model
 import scrap_features
-from api import settings
+from api import data_state, settings
 from api.errors import DataSourceUnavailable
-from api.services import data_state, explanation, recommendation_service
+from api.services import explanation, recommendation_service
 
 _HORIZONS = config.PREDICTION_HORIZON_DAYS
 

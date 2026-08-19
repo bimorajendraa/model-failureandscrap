@@ -22,13 +22,12 @@ import data_reader
 import feature_builder
 import predict as failure_model
 import predict_scrap as scrap_model
+from api import data_state, query_cache
 from api.errors import DataSourceUnavailable, PartNotFound, PartNotScorable
 from api.services import (
     batch_service,
-    data_state,
     explanation,
     history_service,
-    query_cache,
     recommendation_service,
 )
 

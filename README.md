@@ -395,7 +395,7 @@ berikutnya. Setiap jawaban API membawa catatan ini apa adanya.
 ### Kesegaran data
 
 Dua hal bisa membuat aplikasi diam-diam menyajikan angka lama, dan keduanya
-ditutup oleh `api/services/data_state.py`:
+ditutup oleh `api/data_state.py`:
 
 1. **Potret kondisi armada.** `predict.py` menyimpannya di variabel
    level-modul dan mengembalikannya tanpa memeriksa ulang batas waktu data -
@@ -416,7 +416,7 @@ membaca hal yang sama dengan argumen yang sama: batas waktu data, siklus, dan
 event PART itu. Semula setiap panggilan membuka koneksi sendiri - **9 koneksi,
 9 detik** untuk satu endpoint assessment.
 
-`api/services/query_cache.py` menyatukannya: selama satu request, pembacaan
+`api/query_cache.py` menyatukannya: selama satu request, pembacaan
 dengan argumen yang sama dijawab dari hasil pertama. Hasilnya **3 koneksi, 4,8
 detik**, dengan angka prediksi yang persis sama.
 
@@ -530,7 +530,7 @@ evaluasi -> models/vN -> CURRENT  FastAPI -> dashboard
   INFO (model dimuat, batch scoring selesai, potret armada dibuang karena
   data bertambah) hilang diam-diam; Python hanya punya handler darurat untuk
   WARNING ke atas. Level diatur lewat `LOG_LEVEL` (bawaan `INFO`).
-- **Connection pooling** (`api/services/db_pool.py`) - `data_reader.connect()`
+- **Connection pooling** (`api/db_pool.py`) - `data_reader.connect()`
   membuka satu koneksi baru per panggilan, benar untuk `predict.py`/`train.py`
   yang jadi proses CLI sekali pakai, tetapi boros untuk API yang melayani
   banyak request bersamaan. Ditambal transparan lewat monkeypatch saat API
@@ -617,8 +617,12 @@ production_ml/
 │   ├── schemas.py      # bentuk request/response
 │   ├── settings.py     # pengaturan server (bukan konstanta model)
 │   ├── errors.py       # tidak-ditemukan vs tidak-bisa-diskor
-│   ├── routes/         # health, model, prediction, recommendations
-│   └── services/       # prediction, batch, recommendation, explanation
+│   ├── logging_config.py  # setup logging terstruktur
+│   ├── db_pool.py      # connection pooling database
+│   ├── query_cache.py  # dedup pembacaan dalam satu request
+│   ├── data_state.py   # deteksi data bertambah, buang cache basi
+│   ├── routes/         # health, model, prediction, recommendations, monitoring
+│   └── services/       # domain: prediction, batch, recommendation, explanation, ...
 ├── dashboard/          # Streamlit; hanya bicara ke API
 │   ├── app.py          # Overview
 │   └── pages/          # Prioritas, Detail PART, Perencanaan Penggantian

@@ -12,7 +12,8 @@ import pytest
 
 import data_reader
 import predict as failure_model
-from api.services import data_state, prediction_service, query_cache
+from api import data_state, query_cache
+from api.services import prediction_service
 from tests.conftest import needs_database, needs_models
 
 pytestmark = [needs_database, needs_models]
