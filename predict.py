@@ -185,6 +185,16 @@ def predict(item_id: str) -> dict:
     }
 
 
+def clear_fleet_cache() -> None:
+    """Buang potret armada tersimpan supaya dibangun ulang di panggilan berikutnya.
+
+    Dipanggil dari luar (inference/data_state.py) saat data terbukti
+    bertambah - lihat docstring _fleet_snapshot().
+    """
+    global _FLEET
+    _FLEET = None
+
+
 # Nama publik untuk pemanggil di luar modul ini (inference/, batch scoring) -
 # implementasinya tetap satu, tidak diduplikasi.
 load_model = _load_model

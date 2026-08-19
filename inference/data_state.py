@@ -63,7 +63,7 @@ def current_data_end(force_refresh: bool = False) -> pd.Timestamp:
             # Membuang potret di ML core, bukan menghitungnya sendiri:
             # pembangunan ulangnya tetap memakai logic dan pemeriksaan milik
             # predict.py, termasuk validasi potret tersimpan terhadap data_end.
-            failure_model._FLEET = None
+            failure_model.clear_fleet_cache()
             _generation += 1
 
         _data_end = latest
@@ -83,4 +83,4 @@ def reset() -> None:
         _data_end = None
         _checked_at = 0.0
         _generation = 0
-        failure_model._FLEET = None
+        failure_model.clear_fleet_cache()

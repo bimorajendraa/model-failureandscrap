@@ -111,7 +111,7 @@ def _feature_summary(snapshot: pd.DataFrame) -> dict:
 def failure_monitoring() -> dict:
     """Metrik monitoring model kerusakan: offline (dari training) + live
     (dari populasi PART aktif sekarang)."""
-    metadata = failure_model._load_model()[2]
+    metadata = failure_model.load_model()[2]
     scores = batch_predictor.score_active_parts()
     frame = scores.frame
 
@@ -159,7 +159,7 @@ def failure_monitoring() -> dict:
 def scrap_monitoring() -> dict:
     """Metrik monitoring model scrap: offline (dari training) + live (dari
     populasi PART aktif yang kerusakannya baru saja tercatat, kalau ada)."""
-    metadata = scrap_model._load_model()[2]
+    metadata = scrap_model.load_model()[2]
     scores = batch_predictor.score_active_parts()
     frame = scores.frame
 
