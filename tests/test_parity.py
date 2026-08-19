@@ -24,7 +24,7 @@ import data_reader
 import predict as failure_model
 import predict_scrap as scrap_model
 import scrap_features
-from api.services import batch_service
+from inference import batch_predictor
 from tests.conftest import needs_database, needs_models
 
 pytestmark = [needs_database, needs_models]
@@ -77,7 +77,7 @@ def test_kolom_mentah_scrap_batch_sama_dengan_current_state(batch, sample):
     items = sample["item_id"]
     cycles = data_reader.get_cycles()
     events = data_reader.get_events()
-    batched = batch_service._scrap_states(
+    batched = batch_predictor._scrap_states(
         events, cycles, batch.data_end, items
     ).set_index("item_identifier_clean")
 

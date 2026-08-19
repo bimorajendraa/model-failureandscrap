@@ -1,7 +1,7 @@
 """Daftar prioritas hasil batch scoring.
 
 Semua endpoint di sini membaca satu hasil batch yang sama (lihat
-api/services/batch_service.py). Batch dihitung sekali lalu dipakai ulang
+inference/batch_predictor.py). Batch dihitung sekali lalu dipakai ulang
 selama masih segar, jadi permintaan filter/paging tidak pernah memicu
 skoring ulang seluruh armada.
 """
@@ -17,7 +17,7 @@ from api.schemas import (
     OverviewResponse,
     RecommendationListResponse,
 )
-from api.services import batch_service
+from inference import batch_predictor
 
 router = APIRouter(prefix="/api/v1", tags=["recommendations"])
 
@@ -56,8 +56,8 @@ def recommendations(
 ) -> dict:
     """PART yang paling perlu diperhatikan, terurut dari yang paling berisiko."""
     limit = min(limit, settings.MAX_RECOMMENDATION_LIMIT)
-    scores = batch_service.score_active_parts()
-    selected = batch_service.filter_scores(
+    scores = batch_predictor.score_active_parts()
+    selected = batch_predictor.filter_scores(
         scores.frame,
         risk=risk,
         priority=priority,
@@ -82,9 +82,9 @@ def overview(
     top: int = Query(10, ge=1, le=100, description="Berapa PART teratas yang ikut dikirim"),
 ) -> dict:
     """Angka ringkas seluruh armada + daftar teratas, untuk halaman overview."""
-    scores = batch_service.score_active_parts()
+    scores = batch_predictor.score_active_parts()
     return {
-        "summary": batch_service.summary(scores.frame),
+        "summary": batch_predictor.summary(scores.frame),
         "scored_at": scores.scored_at,
         "top_priority": _rows(scores.frame.head(top)),
     }
@@ -93,5 +93,5 @@ def overview(
 @router.get("/filters", response_model=FiltersResponse)
 def filters() -> dict:
     """Nilai filter yang benar-benar ada di data, untuk dropdown dashboard."""
-    scores = batch_service.score_active_parts()
-    return batch_service.facets(scores.frame)
+    scores = batch_predictor.score_active_parts()
+    return batch_predictor.facets(scores.frame)

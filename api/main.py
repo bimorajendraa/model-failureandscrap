@@ -31,7 +31,7 @@ from api.errors import (
     PartNotScorable,
 )
 from api.routes import health, locations, model_info, monitoring, prediction, recommendations
-from api.services import batch_service, model_registry
+from inference import batch_predictor, model_loader
 
 logging_config.setup()
 logger = logging.getLogger("production_ml.api")
@@ -57,15 +57,15 @@ async def lifespan(app: FastAPI):
     db_pool.install()
 
     try:
-        model_registry.warmup()
-        logger.info("Model dimuat: %s", model_registry.versions())
+        model_loader.warmup()
+        logger.info("Model dimuat: %s", model_loader.versions())
     except ModelUnavailable as error:
         # Aplikasi tetap hidup supaya /health bisa melaporkan keadaannya.
         logger.error("Model production belum tersedia: %s", error)
 
     if settings.WARMUP_BATCH_ON_STARTUP:
         try:
-            scores = batch_service.score_active_parts()
+            scores = batch_predictor.score_active_parts()
             logger.info("Batch scoring awal selesai: %d PART aktif", len(scores.frame))
         except Exception as error:  # noqa: BLE001 - start tidak boleh gagal karenanya
             logger.error("Batch scoring awal gagal: %s", error)

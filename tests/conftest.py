@@ -37,9 +37,9 @@ def _database_available() -> bool:
 
 def _models_available() -> bool:
     try:
-        from api.services import model_registry
+        from inference import model_loader
 
-        model_registry.versions()
+        model_loader.versions()
         return True
     except Exception:  # noqa: BLE001
         return False
@@ -97,9 +97,9 @@ def client():
 @pytest.fixture(scope="session")
 def batch():
     """Hasil batch scoring, dihitung sekali untuk seluruh sesi test."""
-    from api.services import batch_service
+    from inference import batch_predictor
 
-    return batch_service.score_active_parts()
+    return batch_predictor.score_active_parts()
 
 
 @pytest.fixture(scope="session")

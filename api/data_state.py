@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 _LOCK = threading.RLock()
 _data_end: pd.Timestamp | None = None
 _checked_at: float = 0.0
-# Naik setiap kali data terbukti bertambah. Dipakai batch_service untuk tahu
+# Naik setiap kali data terbukti bertambah. Dipakai batch_predictor untuk tahu
 # hasilnya perlu dihitung ulang, tanpa perlu query sendiri.
 _generation: int = 0
 

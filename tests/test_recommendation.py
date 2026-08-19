@@ -6,7 +6,7 @@ import itertools
 
 import pytest
 
-from api.services.recommendation_service import (
+from inference.recommendation import (
     PRIORITY_ORDER,
     RISK_LEVELS,
     is_replacement_candidate,

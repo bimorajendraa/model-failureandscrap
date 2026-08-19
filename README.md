@@ -135,25 +135,29 @@ ulang di lapisan ini** - seluruh fitur dan probabilitas tetap dihitung
 PostgreSQL  (read-only)
      |
      v
-data_reader.py  -> feature_builder.py / scrap_features.py
+data_reader.py  -> feature_builder.py / scrap_features.py   <- ML core, tidak diubah
      |
      v
-predict.py / predict_scrap.py            <- ML core, tidak diubah
+predict.py / predict_scrap.py                                <- ML core, tidak diubah
      |
      v
-api/services/    prediction_service, batch_service, recommendation_service
+inference/       model_loader, predictor, batch_predictor,   <- INDEPENDEN dari FastAPI
+                 recommendation, explanation, history            (lihat "Struktur inferensi")
      |
-     v
-api/routes/      FastAPI
-     |
+     +---------------------+---------------------------+
+     v                                                 v
+api/routes/ + api/services/ (FastAPI)      scripts/run_pipeline.py, run_prediction.py
+     |                                          (entry point manual, tanpa server)
      v
 dashboard/       Streamlit
 ```
 
 Aturannya satu arah: **dashboard tidak pernah menyentuh database maupun
-memuat model**. Semua angka yang tampil di layar datang lewat HTTP dari API,
-sehingga ambang risiko, aturan rekomendasi, dan kredensial database hanya ada
-di satu tempat.
+memuat model**, dan **`inference/` tidak pernah bergantung pada `api/`** -
+arah ketergantungannya searah (api -> inference), bukan sebaliknya, supaya
+predictor bisa dipakai dari script atau test tanpa server FastAPI hidup. Semua
+angka yang tampil di layar datang lewat HTTP dari API, sehingga ambang risiko,
+aturan rekomendasi, dan kredensial database hanya ada di satu tempat.
 
 Pemanggil cukup mengirim `item_id`. Fitur ML - umur pemasangan, riwayat
 kerusakan, corrective maintenance, client, lokasi, kondisi armada - dibangun
@@ -291,7 +295,7 @@ prediction_service.get_part_assessment(item_id)
 
 ### Logic rekomendasi
 
-Recommendation engine (`api/services/recommendation_service.py`) **tidak punya
+Recommendation engine (`inference/recommendation.py`) **tidak punya
 ambang sendiri**. Masukannya hanya kelompok risiko yang sudah ditetapkan
 model - ambang angkanya berasal dari kapasitas kerja tim yang dibekukan saat
 training (`FAILURE_CAPACITY_PER_MONTH`, `SCRAP_CAPACITY_PER_MONTH` di
@@ -319,7 +323,7 @@ melainkan penanda bahwa menyiapkan pengganti lebih awal masuk akal.
 
 Dashboard bertanya "PART mana yang paling perlu diperhatikan", bukan "berapa
 risiko PART X". Memanggil `predict()` belasan ribu kali berarti belasan ribu
-kali query database, jadi `api/services/batch_service.py` membaca seluruh data
+kali query database, jadi `inference/batch_predictor.py` membaca seluruh data
 sekali lalu menjalankan model pada semua baris sekaligus:
 
 ```
@@ -349,6 +353,62 @@ saat menyetel ambang HIGH (16.877 PART, 200 di antaranya HIGH).
 Satu-satunya bagian yang ditulis ulang untuk batch adalah penyusunan kolom
 mentah scrap (`scrap_features.current_state()` hanya melayani satu PART per
 panggilan); test membandingkannya kolom per kolom dengan fungsi aslinya.
+
+### Struktur inferensi: `inference/`
+
+`inference/` membungkus ML core (predict.py, predict_scrap.py, feature_builder.py)
+menjadi hasil prediksi siap pakai - **tanpa bergantung pada FastAPI sama
+sekali**. Bisa dipanggil dari mana pun: route API, test, atau script CLI.
+
+| Modul | Tanggung jawab |
+|---|---|
+| `model_loader.py` | muat kedua model + metadata sekali per proses, validasi versi |
+| `predictor.py` | prediksi SATU PART - failure, scrap, assessment gabungan, faktor risiko, riwayat |
+| `batch_predictor.py` | prediksi SELURUH PART aktif sekaligus (vectorized) - lihat "Batch scoring" di atas |
+| `recommendation.py` | terjemahkan kelompok risiko jadi tindakan operasional |
+| `explanation.py` | faktor risiko dalam bahasa manusia, dari fitur yang benar-benar dipakai model |
+| `history.py` | tanggal kerusakan/lokasi mentah untuk mendukung faktor risiko |
+
+Single vs batch **sengaja tetap dua implementasi** (`predictor.py` vs
+`batch_predictor.py`), bukan dipaksa jadi satu fungsi: batch memvektorkan
+seluruh populasi dalam satu query, sementara single membaca riwayat satu PART
+- memaksakan satu jalur kode berarti salah satu jadi sangat lambat (single
+lewat loop batch) atau sangat lambat sebaliknya (batch memanggil predict()
+per item, terbukti perlu puluhan ribu query). Kesetaraan **angkanya**
+dijamin lewat `tests/test_parity.py`, bukan lewat berbagi kode baris-per-baris.
+
+`api/services/` sekarang HANYA menyisakan yang murni urusan API (bukan
+inferensi): `geocoding_service.py` (koordinat untuk peta) dan
+`monitoring_service.py` (agregasi metrik untuk endpoint monitoring, memanggil
+`inference.batch_predictor` seperti route lainnya).
+
+### Menjalankan pipeline dan batch prediction manual
+
+Dua entry point CLI, dipakai lewat `inference/` yang sama persis dengan API -
+hasilnya tidak mungkin berbeda dari yang dilihat lewat HTTP:
+
+```bash
+python scripts/run_pipeline.py
+```
+
+Extract (`data_reader`) -> transform + feature build (`feature_builder`) untuk
+seluruh PART aktif, tanpa memuat model dan tanpa prediksi - membuktikan
+pipeline data berjalan berdiri sendiri. Tidak menyimpan apa pun.
+
+```bash
+python scripts/run_prediction.py                    # cetak 10 teratas
+python scripts/run_prediction.py --top 20            # cetak 20 teratas
+python scripts/run_prediction.py --output hasil.csv  # simpan semua ke CSV
+```
+
+Batch prediction manual lewat `inference.batch_predictor` - fungsi yang SAMA
+dipakai `GET /api/v1/recommendations`. Belum menulis ke "prediction
+database" (lihat bagian "Yang sengaja belum dikerjakan") - `--output` hanya
+CSV lokal untuk pemeriksaan manual.
+
+Keduanya memakai `logging` standar (bukan Grafana/Prometheus): `pipeline
+started`, `database connected`, `rows extracted`, `features generated`,
+`model loaded`, `prediction completed`, dan `error` kalau gagal.
 
 ### Menjalankan dashboard
 
@@ -586,6 +646,24 @@ tersedia. Di CI itu berbahaya: hasilnya terbaca "semua lulus" padahal tidak
 ada yang diuji. Set `REQUIRE_DATABASE=1` supaya ketidaktersediaan menjadi
 kegagalan.
 
+### Yang sengaja belum dikerjakan (tahap ini)
+
+Restrukturisasi `inference/` + `scripts/` menyiapkan batas yang jelas supaya
+tahap local DB -> server DB berikutnya hanya perlu mengganti/menambah SUMBER
+data (`config.db_settings()`), bukan membongkar ML code - tapi tahap itu
+sendiri **belum** dikerjakan di sini, sesuai permintaan:
+
+- Sinkronisasi/ingestion local database -> server database.
+- Prediction database (hasil batch prediction disimpan permanen) - saat ini
+  hanya cache in-memory (`batch_predictor`) dan CSV opsional lewat
+  `--output`.
+- Scheduler/cron untuk menjalankan pipeline otomatis - `scripts/run_pipeline.py`
+  dan `scripts/run_prediction.py` murni manual.
+- Airflow, Kafka, Spark, dbt, Redis, Celery, Kubernetes, MLflow Server,
+  feature store, data warehouse, microservices, event streaming, automatic
+  retraining, CI/CD kompleks, Grafana, Prometheus - tidak satu pun dibutuhkan
+  untuk skala aplikasi ini sekarang.
+
 ### Docker
 
 ```bash
@@ -612,20 +690,31 @@ production_ml/
 ├── train_scrap.py      # latih model scrap
 ├── predict.py          # predict(item_id)
 ├── predict_scrap.py    # predict_scrap(item_id), predict_death_risk(item_id)
-├── api/                # lapisan serving - TIDAK menghitung model apa pun
+├── inference/           # PREDICTOR - independen dari FastAPI, bisa dipakai
+│   │                    # dari script/test mana pun tanpa server hidup
+│   ├── model_loader.py  # muat model + metadata sekali per proses
+│   ├── predictor.py     # prediksi SATU PART
+│   ├── batch_predictor.py  # prediksi SELURUH PART aktif (vectorized)
+│   ├── recommendation.py   # terjemahkan risiko -> tindakan operasional
+│   ├── explanation.py      # faktor risiko dalam bahasa manusia
+│   └── history.py          # riwayat kerusakan/lokasi mentah
+├── api/                # lapisan serving TIPIS - TIDAK menghitung model apa pun
 │   ├── main.py         # aplikasi FastAPI + penanganan kesalahan
 │   ├── schemas.py      # bentuk request/response
 │   ├── settings.py     # pengaturan server (bukan konstanta model)
 │   ├── errors.py       # tidak-ditemukan vs tidak-bisa-diskor
 │   ├── logging_config.py  # setup logging terstruktur
-│   ├── db_pool.py      # connection pooling database
-│   ├── query_cache.py  # dedup pembacaan dalam satu request
+│   ├── db_pool.py      # connection pooling database (server saja)
+│   ├── query_cache.py  # dedup pembacaan dalam satu request HTTP
 │   ├── data_state.py   # deteksi data bertambah, buang cache basi
 │   ├── routes/         # health, model, prediction, recommendations, monitoring
-│   └── services/       # domain: prediction, batch, recommendation, explanation, ...
-├── dashboard/          # Streamlit; hanya bicara ke API
+│   └── services/       # HANYA urusan API: geocoding (peta), monitoring (agregasi)
+├── dashboard/          # Streamlit; hanya bicara ke API lewat HTTP
 │   ├── app.py          # Overview
-│   └── pages/          # Prioritas, Detail PART, Perencanaan Penggantian
+│   └── pages/          # Prioritas, Detail PART, Perencanaan Penggantian, Peta
+├── scripts/             # entry point manual - lihat "Menjalankan pipeline" di bawah
+│   ├── run_pipeline.py   # extract -> transform -> feature build (tanpa prediksi)
+│   └── run_prediction.py # batch prediction manual, lewat inference/ yang sama
 ├── tests/
 ├── Dockerfile
 ├── docker-compose.yml

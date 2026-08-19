@@ -16,7 +16,7 @@ tidak tertukar:
 - Metrik LIVE (dari populasi PART aktif SEKARANG): sebaran skor, jumlah
   HIGH/MEDIUM, pangsa kategori tipe PART yang tidak dikenal model
   (part_model_category UNKNOWN/LOW_SUPPORT), ringkasan fitur numerik, dan
-  probabilitas scrap - dihitung dari hasil batch_service yang sudah ada,
+  probabilitas scrap - dihitung dari hasil batch_predictor yang sudah ada,
   TANPA query tambahan.
 
 Tidak ada label ground-truth untuk PART yang sedang aktif (belum diketahui
@@ -33,7 +33,7 @@ import pandas as pd
 import config
 import predict as failure_model
 import predict_scrap as scrap_model
-from api.services import batch_service, explanation
+from inference import batch_predictor, explanation
 
 # Kolom numerik dari snapshot yang diringkas untuk deteksi feature drift -
 # subset dari explanation.SOURCE_COLUMNS yang murni numerik (bukan
@@ -112,7 +112,7 @@ def failure_monitoring() -> dict:
     """Metrik monitoring model kerusakan: offline (dari training) + live
     (dari populasi PART aktif sekarang)."""
     metadata = failure_model._load_model()[2]
-    scores = batch_service.score_active_parts()
+    scores = batch_predictor.score_active_parts()
     frame = scores.frame
 
     offline = {
@@ -160,7 +160,7 @@ def scrap_monitoring() -> dict:
     """Metrik monitoring model scrap: offline (dari training) + live (dari
     populasi PART aktif yang kerusakannya baru saja tercatat, kalau ada)."""
     metadata = scrap_model._load_model()[2]
-    scores = batch_service.score_active_parts()
+    scores = batch_predictor.score_active_parts()
     frame = scores.frame
 
     offline = {

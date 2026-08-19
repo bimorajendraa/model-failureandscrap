@@ -39,7 +39,7 @@ import predict_scrap as scrap_model
 import scrap_features
 from api import data_state, settings
 from api.errors import DataSourceUnavailable
-from api.services import explanation, recommendation_service
+from inference import explanation, recommendation
 
 _HORIZONS = config.PREDICTION_HORIZON_DAYS
 
@@ -326,14 +326,14 @@ def _attach_recommendation(frame: pd.DataFrame) -> pd.DataFrame:
         None if pd.isna(level) else level for level in frame["scrap_risk_level"]
     ]
     decisions = [
-        recommendation_service.recommend(failure_level, scrap_level)
+        recommendation.recommend(failure_level, scrap_level)
         for failure_level, scrap_level in zip(frame["failure_risk_level"], scrap_levels)
     ]
     frame["priority"] = [decision["priority"] for decision in decisions]
     frame["recommended_action"] = [decision["action"] for decision in decisions]
     frame["recommendation_message"] = [decision["message"] for decision in decisions]
     frame["replacement_candidate"] = [
-        recommendation_service.is_replacement_candidate(failure_level, scrap_level)
+        recommendation.is_replacement_candidate(failure_level, scrap_level)
         for failure_level, scrap_level in zip(frame["failure_risk_level"], scrap_levels)
     ]
     # Rumus sama dengan predict_scrap.predict_death_risk().

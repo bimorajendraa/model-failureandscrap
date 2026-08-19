@@ -13,7 +13,7 @@ import pytest
 import data_reader
 import predict as failure_model
 from api import data_state, query_cache
-from api.services import prediction_service
+from inference import predictor
 from tests.conftest import needs_database, needs_models
 
 pytestmark = [needs_database, needs_models]
@@ -87,7 +87,7 @@ def test_assessment_tidak_membaca_hal_yang_sama_berulang(
     sama persis. Tanpa penyatuan, satu assessment membuka 9 koneksi."""
     data_state.reset()
     count_connections["n"] = 0
-    prediction_service.get_part_assessment(scorable_item, include_explanation=True)
+    predictor.get_part_assessment(scorable_item, include_explanation=True)
     assert count_connections["n"] <= 4, (
         f"{count_connections['n']} koneksi untuk satu assessment - "
         "pembacaan berulang tidak tersatukan"
@@ -116,7 +116,7 @@ def test_cache_tidak_bertahan_antar_request(scorable_item):
 
 def test_hasil_dengan_dan_tanpa_cache_identik(scorable_item):
     """Penghematan pembacaan tidak boleh mengubah satu angka pun."""
-    cached = prediction_service.get_part_assessment(scorable_item, include_explanation=False)
+    cached = predictor.get_part_assessment(scorable_item, include_explanation=False)
 
     # Jalankan lagi tanpa scope sama sekali, langsung lewat ML core.
     direct_failure = failure_model.predict(scorable_item)
@@ -142,10 +142,10 @@ def test_argumen_berbeda_tidak_saling_menimpa(scorable_item, batch):
 def test_penjelasan_dari_batch_sama_dengan_yang_dihitung_langsung(batch, scorable_item):
     """Halaman detail memakai fitur hasil batch kalau tersedia. Nilainya harus
     sama persis dengan yang dibangun untuk satu PART."""
-    from api.services import explanation
+    from inference import explanation
 
-    from_batch = prediction_service._feature_row(scorable_item)
-    direct = prediction_service._active_snapshot(scorable_item).iloc[0]
+    from_batch = predictor._feature_row(scorable_item)
+    direct = predictor._active_snapshot(scorable_item).iloc[0]
 
     for column in explanation.SOURCE_COLUMNS:
         left, right = from_batch[column], direct[column]
@@ -157,13 +157,13 @@ def test_penjelasan_dari_batch_sama_dengan_yang_dihitung_langsung(batch, scorabl
 
 def test_penjelasan_tidak_memicu_batch_saat_cache_kosong(scorable_item):
     """Menjelaskan satu PART tidak boleh memaksa seluruh armada diskor."""
-    from api.services import batch_service
+    from inference import batch_predictor
 
-    saved = batch_service._CACHE
-    batch_service._CACHE = None
+    saved = batch_predictor._CACHE
+    batch_predictor._CACHE = None
     try:
-        result = prediction_service.explain(scorable_item)
+        result = predictor.explain(scorable_item)
         assert result["factors"]
-        assert batch_service._CACHE is None, "penjelasan satu PART memicu batch penuh"
+        assert batch_predictor._CACHE is None, "penjelasan satu PART memicu batch penuh"
     finally:
-        batch_service._CACHE = saved
+        batch_predictor._CACHE = saved

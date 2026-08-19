@@ -13,7 +13,8 @@ from fastapi import APIRouter, Query
 
 from api import settings
 from api.schemas import LocationMapResponse
-from api.services import batch_service, geocoding_service
+from api.services import geocoding_service
+from inference import batch_predictor
 
 router = APIRouter(prefix="/api/v1", tags=["locations"])
 
@@ -41,8 +42,8 @@ def locations_map(
     `budget_seconds` supaya satu request tidak menggantung lama; sisanya baru
     diproses pada panggilan berikutnya.
     """
-    scores = batch_service.score_active_parts()
-    summary = batch_service.location_summary(scores.frame)
+    scores = batch_predictor.score_active_parts()
+    summary = batch_predictor.location_summary(scores.frame)
     locations = summary.index.tolist()
 
     if resolve and locations:

@@ -52,7 +52,7 @@ FAILURE_HISTORY_NOTE = (
 RISK, MITIGATING, CONTEXT = "RISK_FACTOR", "MITIGATING", "CONTEXT"
 
 # Kolom snapshot mentah yang dibaca modul ini. Didaftar di sini supaya
-# batch_service tahu persis apa yang perlu disimpan agar halaman detail bisa
+# batch_predictor tahu persis apa yang perlu disimpan agar halaman detail bisa
 # dilayani tanpa membaca ulang database - dan supaya daftarnya tidak mungkin
 # berbeda dari yang benar-benar dipakai di bawah.
 SOURCE_COLUMNS = [

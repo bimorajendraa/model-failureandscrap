@@ -1,6 +1,6 @@
 """Prediksi untuk satu PART.
 
-Route sengaja tipis: seluruh keputusan ada di api/services/prediction_service.py.
+Route sengaja tipis: seluruh keputusan ada di inference/predictor.py.
 Di sini hanya penerjemahan hasil service menjadi bentuk HTTP.
 
 PART yang ada tetapi tidak bisa diskor TIDAK dianggap error - jawabannya 200
@@ -14,7 +14,7 @@ from fastapi import APIRouter, Path, Query
 
 from api.errors import PartNotScorable
 from api.schemas import AssessmentResponse, FailureResponse, HistoryResponse, ScrapResponse
-from api.services import prediction_service
+from inference import predictor
 
 router = APIRouter(prefix="/api/v1/parts", tags=["parts"])
 
@@ -40,7 +40,7 @@ def failure(item_id: str = _ITEM_ID) -> dict:
     Ini PELUANG, bukan perkiraan tanggal kerusakan.
     """
     try:
-        prediction = prediction_service.predict_failure(item_id)
+        prediction = predictor.predict_failure(item_id)
     except PartNotScorable as error:
         return _not_scorable(error)
     return {"item_id": prediction["item_id"], "status": "SCORED", "failure": prediction}
@@ -53,7 +53,7 @@ def scrap(item_id: str = _ITEM_ID) -> dict:
     BERSYARAT terhadap kerusakan - bukan peluang PART ini rusak.
     """
     try:
-        prediction = prediction_service.predict_scrap(item_id)
+        prediction = predictor.predict_scrap(item_id)
     except PartNotScorable as error:
         return _not_scorable(error)
     return {"item_id": prediction["item_id"], "status": "SCORED", "scrap": prediction}
@@ -67,7 +67,7 @@ def history(item_id: str = _ITEM_ID) -> dict:
     risiko di /assessment yang berupa hitungan (mis. "2 kerusakan dalam 365
     hari terakhir") dengan tanggal sesungguhnya.
     """
-    return prediction_service.item_history(item_id)
+    return predictor.item_history(item_id)
 
 
 @router.get("/{item_id}/assessment", response_model=AssessmentResponse)
@@ -83,6 +83,6 @@ def assessment(
 ) -> dict:
     """Gabungan risiko kerusakan + risiko scrap + rekomendasi tindakan."""
     try:
-        return prediction_service.get_part_assessment(item_id, include_explanation=explain)
+        return predictor.get_part_assessment(item_id, include_explanation=explain)
     except PartNotScorable as error:
         return _not_scorable(error)

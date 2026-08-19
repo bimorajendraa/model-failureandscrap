@@ -8,7 +8,7 @@ import data_reader
 from api import db_pool
 from api.errors import ModelUnavailable
 from api.schemas import HealthResponse
-from api.services import batch_service, model_registry
+from inference import batch_predictor, model_loader
 
 router = APIRouter(tags=["health"])
 
@@ -25,7 +25,7 @@ def health(check_database: bool = False) -> dict:
     ?check_database=true kalau memang ingin memastikan koneksinya hidup.
     """
     try:
-        versions: dict[str, str | None] = dict(model_registry.versions())
+        versions: dict[str, str | None] = dict(model_loader.versions())
         model_ok = True
     except ModelUnavailable:
         versions = {"failure": None, "scrap": None}
@@ -41,7 +41,7 @@ def health(check_database: bool = False) -> dict:
         except Exception:  # noqa: BLE001 - detailnya tidak boleh bocor ke client
             database = "unreachable"
 
-    cached = batch_service.cached_scores()
+    cached = batch_predictor.cached_scores()
     return {
         "status": "ok" if model_ok and database != "unreachable" else "degraded",
         "api_version": API_VERSION,

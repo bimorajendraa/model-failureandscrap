@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from api.services import model_registry
+from inference import model_loader
 
 router = APIRouter(prefix="/api/v1", tags=["model"])
 
@@ -16,4 +16,4 @@ def model_info() -> dict:
     Seluruhnya dibaca dari metadata.json yang ditulis train.py /
     train_scrap.py - tidak ada angka yang dihitung ulang di sini.
     """
-    return model_registry.describe()
+    return model_loader.describe()

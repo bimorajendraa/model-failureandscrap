@@ -24,12 +24,7 @@ import predict as failure_model
 import predict_scrap as scrap_model
 from api import data_state, query_cache
 from api.errors import DataSourceUnavailable, PartNotFound, PartNotScorable
-from api.services import (
-    batch_service,
-    explanation,
-    history_service,
-    recommendation_service,
-)
+from inference import batch_predictor, explanation, history, recommendation
 
 
 def _guard(call, *args, **kwargs):
@@ -132,10 +127,10 @@ def get_part_assessment(item_id: str, include_explanation: bool = True) -> dict:
                 if scrap
                 else None
             ),
-            "recommendation": recommendation_service.recommend(
+            "recommendation": recommendation.recommend(
                 failure["risk_level"], scrap_level
             ),
-            "replacement_candidate": recommendation_service.is_replacement_candidate(
+            "replacement_candidate": recommendation.is_replacement_candidate(
                 failure["risk_level"], scrap_level
             ),
             "model_version": {
@@ -179,7 +174,7 @@ def _feature_row(item_id: str) -> pd.Series:
     saja - jauh lebih murah daripada memaksa seluruh armada diskor hanya untuk
     menjelaskan satu PART.
     """
-    cached = batch_service.cached_scores()
+    cached = batch_predictor.cached_scores()
     if cached is not None and not cached.is_stale(data_state.generation()):
         # Normalisasi yang sama dengan yang dipakai data_reader saat
         # mencocokkan identifier, supaya "part-a" tetap ketemu.
@@ -210,8 +205,8 @@ def item_history(item_id: str) -> dict:
             raise PartNotFound(item_id)
         return {
             "item_id": item_id,
-            "failures": history_service.failure_history(events),
-            "locations": history_service.location_history(events),
+            "failures": history.failure_history(events),
+            "locations": history.location_history(events),
         }
 
 
