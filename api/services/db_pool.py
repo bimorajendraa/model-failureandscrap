@@ -1,27 +1,15 @@
 """Connection pooling untuk data_reader.connect(), TANPA mengubah data_reader.py.
 
-MASALAH YANG DIPECAHKAN DI SINI
+data_reader.connect() membuka satu koneksi baru per panggilan - benar untuk
+predict.py/train.py yang berjalan sebentar, tapi boros di API yang melayani
+banyak request bersamaan. Modul ini menambal data_reader.connect SEKALI saat
+API start (pola yang sama dengan query_cache.py) supaya seluruh pemanggilan
+`with data_reader.connect() as conn:` yang sudah ada transparan memakai
+koneksi dari pool, tanpa mengubah satu baris pun kode ML core.
 
-`data_reader.connect()` membuka SATU koneksi psycopg baru per panggilan -
-benar untuk predict.py/train.py yang berjalan sebagai proses CLI sekali
-pakai, tetapi di API yang melayani banyak request bersamaan, membuka koneksi
-TCP+autentikasi baru setiap kali `api/services/query_cache.py` tidak bisa
-menyatukan pembacaan (mis. dua request dari PART berbeda datang bersamaan)
-itu boros dan bisa membebani database saat trafik naik.
-
-Modul ini menambal `data_reader.connect` SEKALI saat API start - persis pola
-yang sudah dipakai `query_cache.py` untuk menyatukan `get_events`/`get_cycles`
-- supaya seluruh pemanggilan `with data_reader.connect() as conn:` yang sudah
-ada (termasuk di dalam data_reader.py sendiri) transparan memakai koneksi
-dari pool, tanpa mengubah satu baris pun kode ML core.
-
-BATASNYA JELAS
-
-- Hanya API yang memasangnya (lewat install() di lifespan main.py).
-  `python predict.py` atau `python train.py` dari terminal tetap memakai
-  psycopg.connect() langsung apa adanya - tidak pernah menyentuh pool ini.
-- Semantik read-only dan timeout yang sama persis dengan connect() asli
-  dipertahankan (options=default_transaction_read_only=on, application_name).
+Hanya API yang memasangnya, lewat install() di lifespan main.py. Dipanggil
+dari terminal (predict.py/train.py), data_reader.connect tetap
+psycopg.connect() langsung apa adanya.
 """
 
 from __future__ import annotations
@@ -49,20 +37,14 @@ MAX_SIZE = 8
 
 
 def install() -> None:
-    """Buat pool sekali per proses dan tambal data_reader.connect. Aman
-    dipanggil berulang - panggilan kedua dan seterusnya tidak melakukan
-    apa-apa selama pool yang ada masih terbuka.
+    """Buat pool sekali per proses dan tambal data_reader.connect.
 
-    SENGAJA idempoten seperti query_cache.install(), bukan "tutup lalu buat
-    ulang" seperti versi sebelumnya: test suite membuat banyak TestClient
-    terpisah dalam satu proses yang sama (lihat tests/test_dashboard.py,
-    tests/test_api.py) - "tutup lalu buat ulang" pada setiap start aplikasi
-    berarti TestClient KEDUA menutup pool yang masih dipakai TestClient
-    PERTAMA (dan pemanggilan data_reader langsung di luar TestClient mana
-    pun, seperti di conftest.py), meledakkan PoolClosed di tengah test lain
-    yang sedang berjalan. Dalam production sesungguhnya hanya ada SATU
-    siklus hidup aplikasi per proses, jadi idempoten ini juga yang benar
-    di sana.
+    Idempoten seperti query_cache.install() - bukan "tutup lalu buat ulang":
+    test suite membuat beberapa TestClient terpisah dalam satu proses, dan
+    "tutup lalu buat ulang" pada tiap start aplikasi berarti TestClient kedua
+    menutup pool yang masih dipakai yang pertama. Production sesungguhnya
+    hanya punya satu siklus hidup aplikasi per proses, jadi idempoten ini
+    juga yang benar di sana.
     """
     global _pool
     with _lock:
@@ -83,33 +65,26 @@ def install() -> None:
         data_reader.connect = _pool.connection
         logger.info("Connection pool database siap (min=%d, max=%d)", MIN_SIZE, MAX_SIZE)
 
-        # Sekali per PROSES (bukan per siklus hidup aplikasi - lihat
-        # docstring install()), supaya pool ditutup rapi lewat close() saat
-        # interpreter benar-benar keluar, alih-alih dibiarkan diserahkan ke
-        # __del__ garbage collector yang bisa mencoba logging setelah stdout
-        # sudah ditutup duluan.
+        # Sekali per proses (bukan per siklus hidup aplikasi), lewat atexit
+        # daripada __del__ garbage collector - __del__ bisa terpanggil setelah
+        # stdout sudah ditutup dan gagal saat mencoba logging.
         atexit.register(teardown)
 
 
 def teardown() -> None:
     """Tutup pool secara eksplisit.
 
-    TIDAK dipanggil otomatis saat aplikasi berhenti (lihat penjelasan di
-    install()) - dipanggil lewat atexit SEKALI saat interpreter benar-benar
-    keluar, dan tersedia untuk pembersihan manual di luar itu.
+    Tidak dipanggil otomatis saat aplikasi berhenti (lihat install()) -
+    dipanggil lewat atexit sekali saat interpreter keluar, dan tersedia untuk
+    pembersihan manual di luar itu.
     """
     global _pool
     with _lock:
         if _pool is not None:
             _pool.close()
             _pool = None
-            # TIDAK logging di sini: dipanggil lewat atexit, dan pada tahap
-            # itu stream logging bisa saja sudah ditutup duluan oleh
-            # mekanisme lain (mis. capture pytest saat test selesai) - logging
-            # module sendiri yang mencetak diagnostik kegagalannya langsung
-            # ke stderr saat itu terjadi, di luar jangkauan try/except di
-            # sini. Bukan kegagalan sungguhan, hanya urutan shutdown yang di
-            # luar kendali - lebih baik tidak mencoba logging sama sekali.
+            # Tidak logging di sini: pada saat atexit berjalan, stream
+            # logging bisa saja sudah ditutup duluan oleh mekanisme lain.
 
 
 def stats() -> dict:

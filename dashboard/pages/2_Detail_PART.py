@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pandas as pd
 import streamlit as st
 
 import api_client
@@ -118,35 +117,22 @@ if explanation:
 
     if history:
         with st.expander("Tanggal kerusakan"):
+            ui.labeled_table(
+                history["failures"],
+                columns=["date", "location", "status"],
+                empty_message="Belum pernah tercatat rusak.",
+            )
             if history["failures"]:
-                st.dataframe(
-                    pd.DataFrame(history["failures"]).rename(
-                        columns={"date": "Tanggal", "location": "Lokasi", "status": "Status"}
-                    ),
-                    width="stretch",
-                    hide_index=True,
-                )
-                st.caption(
-                    "Seluruh kerusakan yang tercatat, bukan hanya 365 hari terakhir."
-                )
-            else:
-                st.caption("Belum pernah tercatat rusak.")
+                st.caption("Seluruh kerusakan yang tercatat, bukan hanya 365 hari terakhir.")
 
         with st.expander("Riwayat lokasi"):
+            ui.labeled_table(
+                history["locations"],
+                columns=["location", "first_seen", "last_seen", "events"],
+                empty_message="Belum ada lokasi yang tercatat.",
+            )
             if history["locations"]:
-                st.dataframe(
-                    pd.DataFrame(history["locations"]).rename(columns={
-                        "location": "Lokasi",
-                        "first_seen": "Pertama tercatat",
-                        "last_seen": "Terakhir tercatat",
-                        "events": "Jumlah catatan",
-                    }),
-                    width="stretch",
-                    hide_index=True,
-                )
                 st.caption("Diurutkan dari lokasi yang paling terakhir aktif.")
-            else:
-                st.caption("Belum ada lokasi yang tercatat.")
 
 st.divider()
 versions = data["model_version"]

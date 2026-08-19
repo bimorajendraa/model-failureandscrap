@@ -34,14 +34,6 @@ def _rows(frame: pd.DataFrame) -> list[dict]:
     ]
 
 
-def _scored_at(scores: batch_service.BatchScores) -> dict:
-    return {
-        "data_through": str(scores.data_end),
-        "computed_seconds_ago": int(scores.age_seconds),
-        "model_version": scores.model_version,
-    }
-
-
 @router.get("/recommendations", response_model=RecommendationListResponse)
 def recommendations(
     risk: str | None = Query(None, description="Saring kelompok risiko kerusakan: LOW/MEDIUM/HIGH"),
@@ -80,7 +72,7 @@ def recommendations(
         "total": int(len(selected)),
         "returned": int(len(page)),
         "offset": offset,
-        "scored_at": _scored_at(scores),
+        "scored_at": scores.scored_at,
         "items": _rows(page),
     }
 
@@ -93,7 +85,7 @@ def overview(
     scores = batch_service.score_active_parts()
     return {
         "summary": batch_service.summary(scores.frame),
-        "scored_at": _scored_at(scores),
+        "scored_at": scores.scored_at,
         "top_priority": _rows(scores.frame.head(top)),
     }
 

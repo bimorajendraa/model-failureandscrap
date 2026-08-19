@@ -41,6 +41,16 @@ COLUMN_LABELS = {
     "death_probability_30d": "Risiko mati 30H",
     "priority": "Prioritas",
     "recommended_action": "Tindakan",
+    "active_parts": "PART aktif",
+    "high_risk_parts": "Risiko tinggi",
+    "medium_risk_parts": "Risiko sedang",
+    "replacement_candidates": "Kandidat penggantian",
+    "checked": "Status",
+    "date": "Tanggal",
+    "status": "Status",
+    "first_seen": "Pertama tercatat",
+    "last_seen": "Terakhir tercatat",
+    "events": "Jumlah catatan",
 }
 
 
@@ -75,7 +85,7 @@ def risk_badge(level: str | None) -> str:
 # RGBA (0-255) untuk titik peta - dipisah jadi konstanta supaya kalimat
 # legenda peta dan warna sungguhan tidak pernah berbeda.
 MAP_HIGH_COLOR = [192, 57, 43, 200]
-MAP_MEDIUM_COLOR = [39, 143, 245, 0.8]
+MAP_MEDIUM_COLOR = [214, 151, 22, 200]
 MAP_LOW_COLOR = [74, 144, 217, 170]
 
 
@@ -136,6 +146,22 @@ def priority_table(items: list[dict], columns: list[str], key: str = "priority_t
         # pencarian tanpa perlu URL/query param.
         st.session_state["detail_item_id"] = selected_id
         st.switch_page("pages/2_Detail_PART.py")
+
+
+def labeled_table(items: list[dict], columns: list[str], empty_message: str = "") -> None:
+    """Tabel sederhana dengan kolom dilabeli lewat COLUMN_LABELS - tanpa
+    seleksi baris atau format persen (itu urusan priority_table)."""
+    if not items:
+        if empty_message:
+            st.caption(empty_message)
+        return
+    frame = pd.DataFrame(items)
+    present = [column for column in columns if column in frame.columns]
+    st.dataframe(
+        frame[present].rename(columns=COLUMN_LABELS),
+        width="stretch",
+        hide_index=True,
+    )
 
 
 def horizon_metrics(failure: dict) -> None:

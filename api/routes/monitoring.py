@@ -1,18 +1,6 @@
-"""Fondasi monitoring - metrik untuk diamati, bukan alert atau retraining.
-
-Dua kelompok metrik dikirim untuk tiap model:
-
-- `offline`: hasil evaluasi SAAT TRAINING (PR-AUC, ROC-AUC, Precision/
-  Recall@kapasitas, Brier) - dibaca apa adanya dari metadata.json, TIDAK
-  dihitung ulang di sini.
-- `live`: kondisi populasi PART aktif SEKARANG (sebaran skor, jumlah HIGH/
-  MEDIUM, pangsa kategori tak dikenal, ringkasan fitur) - tidak ada label
-  ground-truth untuk PART yang sedang aktif, jadi PR-AUC/ROC-AUC LIVE
-  secara matematis tidak ada di sini.
-
-Retraining otomatis SENGAJA tidak dibangun di atas endpoint ini - monitoring
-harus terbukti stabil dulu sebelum keputusan otomatis dibangun di atasnya.
-"""
+"""Endpoint monitoring - metrik offline (training) dan live (populasi aktif)
+untuk tiap model. Lihat api/services/monitoring_service.py untuk definisi
+lengkap keduanya dan kenapa dipisah tegas."""
 
 from __future__ import annotations
 

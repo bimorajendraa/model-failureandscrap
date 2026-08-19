@@ -1,18 +1,10 @@
 """Konfigurasi logging - dipanggil sekali saat aplikasi start.
 
-MASALAH YANG DIPECAHKAN DI SINI
-
-Modul-modul di api/ sudah memanggil `logging.getLogger(__name__)` dan mencatat
-kejadian penting (model dimuat, batch scoring selesai, potret armada dibuang
-karena data bertambah, kegagalan geocoding, database tidak bisa dibaca) -
-tetapi tanpa logging DIKONFIGURASI, pesan level INFO itu hilang diam-diam.
-Python hanya punya "handler darurat" untuk WARNING ke atas; di bawah itu,
-tidak ada yang tercetak sama sekali kecuali root logger diberi handler.
-
-Akibatnya di production: startup terlihat sukses, tapi tidak ada jejak APAKAH
-model benar-benar dimuat, batch scoring awal berhasil, atau data ternyata
-sudah bertambah dan potret armada dibuang. Semuanya sudah dicatat lewat
-logger.info() - hanya tidak pernah keluar ke mana pun.
+Modul-modul di api/ sudah memanggil logging.getLogger(__name__) dan mencatat
+kejadian penting (model dimuat, batch scoring selesai, potret armada dibuang),
+tapi tanpa logging dikonfigurasi, pesan level INFO hilang diam-diam - Python
+hanya punya handler darurat untuk WARNING ke atas. Tanpa modul ini, startup
+production terlihat sukses tanpa jejak apakah model benar-benar dimuat.
 """
 
 from __future__ import annotations

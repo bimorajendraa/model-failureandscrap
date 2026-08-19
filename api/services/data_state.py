@@ -1,25 +1,16 @@
 """Menjaga aplikasi tidak diam-diam memakai angka basi.
 
-MASALAH YANG DIPECAHKAN DI SINI
-
 `predict.py` menyimpan potret kondisi armada di variabel level-modul dan
-mengembalikannya tanpa memeriksa ulang batas waktu data:
+mengembalikannya tanpa memeriksa ulang batas waktu data - benar untuk proses
+CLI yang hidup sebentar, tapi di server yang hidup berhari-hari begitu
+database bertambah, 3 fitur kondisi armada tetap beku di nilai request
+pertama sejak start sementara 18 fitur lain sudah segar. Tidak ada error;
+prediksi tetap keluar, hanya diam-diam salah.
 
-    if _FLEET is not None:
-        return _FLEET          # data_end tidak diperiksa lagi
-
-Itu benar untuk pemakaian aslinya - proses CLI yang hidup beberapa detik lalu
-mati. Di server yang hidup berhari-hari akibatnya lain: begitu database
-bertambah, 18 fitur lain ikut segar sementara 3 fitur kondisi armada BEKU di
-nilai request pertama sejak start. Prediksi tetap keluar, tidak ada error, dan
-tidak ada yang menyadarinya.
-
-Modul ini menutup celah itu dari luar, tanpa mengubah `predict.py`: batas waktu
+Modul ini menutup celah itu dari luar tanpa mengubah predict.py: batas waktu
 data diperiksa berkala, dan begitu terbukti bergeser, potret armada dibuang
-supaya ML core membangunnya ulang dengan pemeriksaannya sendiri.
-
-Hasil batch scoring ikut ditandai basi lewat jalur yang sama, jadi kesegaran
-seluruh aplikasi ditentukan satu tempat.
+supaya ML core membangunnya ulang dengan pemeriksaannya sendiri. Hasil batch
+scoring ikut ditandai basi lewat penanda generation yang sama.
 """
 
 from __future__ import annotations

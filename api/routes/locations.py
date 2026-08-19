@@ -63,9 +63,5 @@ def locations_map(
     return {
         "resolved": resolved,
         "unresolved": unresolved,
-        "scored_at": {
-            "data_through": str(scores.data_end),
-            "computed_seconds_ago": int(scores.age_seconds),
-            "model_version": scores.model_version,
-        },
+        "scored_at": scores.scored_at,
     }

@@ -132,17 +132,10 @@ if resolved:
     )
 
     with st.expander(f"Tabel lokasi di peta ({len(resolved)})"):
-        table = frame.sort_values("high_risk_parts", ascending=False)[[
-            "location", "active_parts", "high_risk_parts", "medium_risk_parts",
-            "replacement_candidates",
-        ]]
-        st.dataframe(
-            table.rename(columns={
-                "location": "Lokasi", "active_parts": "PART aktif",
-                "high_risk_parts": "Risiko tinggi", "medium_risk_parts": "Risiko sedang",
-                "replacement_candidates": "Kandidat penggantian",
-            }),
-            width="stretch", hide_index=True,
+        sorted_resolved = sorted(resolved, key=lambda item: -item["high_risk_parts"])
+        ui.labeled_table(
+            sorted_resolved,
+            columns=["location", "active_parts", "high_risk_parts", "medium_risk_parts", "replacement_candidates"],
         )
 else:
     st.info("Belum ada lokasi yang berhasil dipetakan.")
@@ -154,15 +147,12 @@ if unresolved:
         "Tetap diurutkan berdasarkan risiko supaya tidak terlewat hanya karena "
         "belum ada koordinatnya."
     )
-    table = pd.DataFrame(unresolved).sort_values("high_risk_parts", ascending=False)
-    table["checked"] = table["checked"].map({True: "Sudah dicoba, tidak ketemu", False: "Belum dicoba"})
-    st.dataframe(
-        table[[
-            "location", "active_parts", "high_risk_parts", "medium_risk_parts", "checked",
-        ]].rename(columns={
-            "location": "Lokasi", "active_parts": "PART aktif",
-            "high_risk_parts": "Risiko tinggi", "medium_risk_parts": "Risiko sedang",
-            "checked": "Status",
-        }),
-        width="stretch", hide_index=True,
+    status_label = {True: "Sudah dicoba, tidak ketemu", False: "Belum dicoba"}
+    sorted_unresolved = [
+        {**item, "checked": status_label[item["checked"]]}
+        for item in sorted(unresolved, key=lambda item: -item["high_risk_parts"])
+    ]
+    ui.labeled_table(
+        sorted_unresolved,
+        columns=["location", "active_parts", "high_risk_parts", "medium_risk_parts", "checked"],
     )

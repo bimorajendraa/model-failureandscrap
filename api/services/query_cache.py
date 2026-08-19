@@ -1,33 +1,15 @@
-"""Menghapus pembacaan database yang terduplikasi di dalam SATU request.
+"""Menyatukan pembacaan data_reader yang berulang di dalam SATU request.
 
-MASALAH YANG DIPECAHKAN DI SINI
+`predict()` dan `predict_scrap()` masing-masing berdiri sendiri (sengaja,
+supaya kedua model tetap independen), tapi keduanya membaca
+get_dataset_max_event_on/get_cycles/get_events dengan argumen yang sama.
+Tanpa penyatuan ini, satu endpoint assessment memakai 9 koneksi database;
+dengan ini, 3.
 
-Menilai satu PART memanggil `predict()` dan `predict_scrap()`, dan keduanya -
-masing-masing berdiri sendiri, sebagaimana mestinya - membaca hal yang sama:
-
-    predict()        get_dataset_max_event_on(), get_cycles(item), get_events(item)
-    predict_scrap()  get_dataset_max_event_on(), get_events(item), get_cycles(item)
-
-Argumennya identik, hasilnya identik, tetapi setiap panggilan membuka koneksi
-baru. Terukur: 9 koneksi dan 9 detik untuk satu endpoint assessment.
-
-Menyatukannya di dalam ML core berarti membongkar pemisahan kedua model, dan
-itu justru yang harus dijaga. Jadi penyatuannya dilakukan di sini: selama satu
-request, pembacaan dengan argumen yang sama dijawab dari hasil pertama.
-
-BATASNYA JELAS, DAN ITU YANG MEMBUATNYA AMAN
-
-- Cache hanya hidup di dalam `request_scope()`, dan hanya untuk thread itu.
-  Di luar scope, fungsi aslinya dipanggil apa adanya - `train.py`, `predict.py`
-  dari terminal, dan batch scoring tidak terpengaruh sama sekali.
-- Isinya dibuang begitu scope selesai, jadi tidak mungkin ada data yang
-  bertahan antar-request.
-- Dalam satu request, batas waktu data memang HARUS sama untuk kedua model.
-  Membacanya dua kali justru berisiko menghasilkan dua titik observasi berbeda
-  kalau database bertambah di tengah request.
-
-Kesetaraan hasilnya dijaga tests/test_query_cache.py, yang membandingkan
-prediksi dengan dan tanpa cache untuk PART yang sama.
+Cache hanya hidup selama `request_scope()` dan hanya untuk thread itu - di
+luar scope, data_reader dipanggil apa adanya, jadi predict.py/train.py dari
+terminal dan batch scoring tidak terpengaruh. Kesetaraan hasilnya dijaga
+tests/test_freshness.py.
 """
 
 from __future__ import annotations

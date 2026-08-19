@@ -62,6 +62,16 @@ class BatchScores:
     def age_seconds(self) -> float:
         return time.time() - self.computed_at
 
+    @property
+    def scored_at(self) -> dict:
+        """Bentuk ScoredAt (lihat api/schemas.py) - dipakai semua route yang
+        menyertakan hasil batch, supaya bentuknya tidak diketik ulang."""
+        return {
+            "data_through": str(self.data_end),
+            "computed_seconds_ago": int(self.age_seconds),
+            "model_version": self.model_version,
+        }
+
     def is_stale(self, generation: int) -> bool:
         """Basi kalau umurnya lewat, ATAU kalau database sudah bertambah.
 
