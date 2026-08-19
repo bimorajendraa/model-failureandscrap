@@ -149,6 +149,11 @@ def predict_death_risk(item_id: str) -> dict:
     }
 
 
+# Nama publik untuk pemanggil di luar modul ini (inference/, batch scoring).
+load_model = _load_model
+risk_level = _risk_level
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         raise SystemExit("Cara pakai: python predict_scrap.py <ITEM_ID>")

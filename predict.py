@@ -185,6 +185,13 @@ def predict(item_id: str) -> dict:
     }
 
 
+# Nama publik untuk pemanggil di luar modul ini (inference/, batch scoring) -
+# implementasinya tetap satu, tidak diduplikasi.
+load_model = _load_model
+fleet_snapshot = _fleet_snapshot
+risk_level = _risk_level
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         raise SystemExit("Cara pakai: python predict.py <ITEM_ID>")

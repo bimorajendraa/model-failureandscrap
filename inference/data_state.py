@@ -23,7 +23,7 @@ import pandas as pd
 
 import data_reader
 import predict as failure_model
-from api import settings
+from inference import settings
 
 logger = logging.getLogger(__name__)
 

@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Path, Query
 
-from api.errors import PartNotScorable
 from api.schemas import AssessmentResponse, FailureResponse, HistoryResponse, ScrapResponse
 from inference import predictor
+from inference.errors import PartNotScorable
 
 router = APIRouter(prefix="/api/v1/parts", tags=["parts"])
 

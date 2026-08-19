@@ -455,7 +455,7 @@ berikutnya. Setiap jawaban API membawa catatan ini apa adanya.
 ### Kesegaran data
 
 Dua hal bisa membuat aplikasi diam-diam menyajikan angka lama, dan keduanya
-ditutup oleh `api/data_state.py`:
+ditutup oleh `inference/data_state.py`:
 
 1. **Potret kondisi armada.** `predict.py` menyimpannya di variabel
    level-modul dan mengembalikannya tanpa memeriksa ulang batas waktu data -
@@ -476,7 +476,7 @@ membaca hal yang sama dengan argumen yang sama: batas waktu data, siklus, dan
 event PART itu. Semula setiap panggilan membuka koneksi sendiri - **9 koneksi,
 9 detik** untuk satu endpoint assessment.
 
-`api/query_cache.py` menyatukannya: selama satu request, pembacaan
+`inference/query_cache.py` menyatukannya: selama satu request, pembacaan
 dengan argumen yang sama dijawab dari hasil pertama. Hasilnya **3 koneksi, 4,8
 detik**, dengan angka prediksi yang persis sama.
 

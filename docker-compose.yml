@@ -4,7 +4,10 @@ services:
     image: production-ml:latest
     env_file: .env
     ports:
-      - "8000:8000"
+      # Hanya localhost - siap untuk Nginx reverse proxy nanti (belum
+      # disiapkan sekarang). Tanpa "127.0.0.1:" port ini kebuka ke jaringan
+      # publik kalau host punya IP publik.
+      - "127.0.0.1:8000:8000"
     # Di Linux, database yang jalan di host dijangkau lewat nama ini.
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -27,7 +30,18 @@ services:
       - --server.headless=true
       - --browser.gatherUsageStats=false
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
+    # Image ini sama dengan service api, jadi HEALTHCHECK bawaan Dockerfile
+    # (cek port 8000) selalu gagal di container ini - tidak ada yang
+    # mendengarkan di situ, yang jalan cuma Streamlit di 8501. Ditimpa di sini
+    # supaya healthcheck memang mengecek proses yang benar-benar jalan.
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health').read()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
     depends_on:
       - api
     restart: unless-stopped

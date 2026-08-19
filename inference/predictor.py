@@ -22,9 +22,8 @@ import data_reader
 import feature_builder
 import predict as failure_model
 import predict_scrap as scrap_model
-from api import data_state, query_cache
-from api.errors import DataSourceUnavailable, PartNotFound, PartNotScorable
-from inference import batch_predictor, explanation, history, recommendation
+from inference import batch_predictor, data_state, explanation, history, query_cache, recommendation
+from inference.errors import DataSourceUnavailable, PartNotFound, PartNotScorable
 
 
 def _guard(call, *args, **kwargs):
@@ -146,7 +145,7 @@ def get_part_assessment(item_id: str, include_explanation: bool = True) -> dict:
 
 def explain(item_id: str) -> dict:
     """Faktor risiko satu PART, dari nilai fitur yang benar-benar dipakai model."""
-    _, _, metadata = failure_model._load_model()
+    _, _, metadata = failure_model.load_model()
     row = _feature_row(item_id)
     factors = explanation.risk_factors(row)
     notes = [explanation.FAILURE_HISTORY_NOTE]
@@ -178,7 +177,7 @@ def _feature_row(item_id: str) -> pd.Series:
     if cached is not None and not cached.is_stale(data_state.generation()):
         # Normalisasi yang sama dengan yang dipakai data_reader saat
         # mencocokkan identifier, supaya "part-a" tetap ketemu.
-        for key in (item_id, data_reader._normalize(item_id)):
+        for key in (item_id, data_reader.normalize(item_id)):
             if key in cached.snapshot.index:
                 return _single_row(cached.snapshot.loc[key])
 
@@ -235,5 +234,5 @@ def _active_snapshot(item_id: str) -> pd.DataFrame:
             snapshot, _guard(data_reader.get_events, item_id)
         )
         return feature_builder.attach_fleet_snapshot(
-            snapshot, failure_model._fleet_snapshot(data_end)
+            snapshot, failure_model.fleet_snapshot(data_end)
         )

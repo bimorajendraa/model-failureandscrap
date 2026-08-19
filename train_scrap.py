@@ -38,7 +38,6 @@ from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
     balanced_accuracy_score,
-    brier_score_loss,
     confusion_matrix,
     precision_score,
     recall_score,
@@ -51,6 +50,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 import config
 import data_reader
 import scrap_features
+import training_utils
 
 CURRENT_POINTER = config.SCRAP_MODEL_DIR / "CURRENT"
 
@@ -203,52 +203,6 @@ def choose_cutoffs(
     return high, medium, basis
 
 
-def next_version() -> str:
-    existing = [
-        int(path.name[1:]) for path in config.SCRAP_MODEL_DIR.glob("v*")
-        if path.is_dir() and path.name[1:].isdigit()
-    ]
-    return f"v{max(existing, default=0) + 1}"
-
-
-def current_version() -> str | None:
-    if not CURRENT_POINTER.exists():
-        return None
-    version = CURRENT_POINTER.read_text(encoding="utf-8").strip()
-    return version if (config.SCRAP_MODEL_DIR / version / "metadata.json").exists() else None
-
-
-def capacity_metrics(raw: np.ndarray, target: np.ndarray, window_days: float) -> dict:
-    """Precision/recall pada sejumlah kerusakan teratas yang setara kapasitas
-    kerja tim untuk panjang window uji ini - sama prinsipnya dengan
-    train.py:capacity_metrics(), supaya kedua model dibandingkan dengan cara
-    yang konsisten."""
-    months = max(window_days / 30.44, 1e-9)
-    capacity = max(int(round(config.SCRAP_CAPACITY_PER_MONTH * months)), 1)
-    capacity = min(capacity, len(raw))
-    flagged = np.argsort(-raw)[:capacity]
-    true_positive = int(target[flagged].sum())
-    return {
-        "capacity_evaluated": capacity,
-        "precision_at_capacity": true_positive / capacity if capacity else 0.0,
-        "recall_at_capacity": true_positive / max(int(target.sum()), 1),
-    }
-
-
-def full_metrics(raw: np.ndarray, calibrated: np.ndarray, target: np.ndarray, window_days: float) -> dict:
-    """Satu set metrik yang dipakai SAMA PERSIS untuk kandidat maupun model
-    lama (incumbent) - lihat train.py:full_metrics() untuk alasannya."""
-    metrics = {
-        "rows": int(len(target)),
-        "positives": int(target.sum()),
-        "roc_auc": float(roc_auc_score(target, raw)),
-        "pr_auc": float(average_precision_score(target, raw)),
-        "brier_calibrated": float(brier_score_loss(target, calibrated)),
-    }
-    metrics.update(capacity_metrics(raw, target, window_days))
-    return metrics
-
-
 def evaluate_incumbent(previous_version: str, dataset: pd.DataFrame, is_test: np.ndarray) -> dict:
     """Jalankan model CURRENT (bukan kandidat) pada test split yang PERSIS
     SAMA seperti kandidat - lihat penjelasan lengkap di
@@ -272,40 +226,6 @@ def evaluate_incumbent(previous_version: str, dataset: pd.DataFrame, is_test: np
     calibrated = calibrator.predict_proba(raw.reshape(-1, 1))[:, 1]
     target = test_dataset["is_scrap"].to_numpy()
     return {"model_version": previous_version, "raw": raw, "calibrated": calibrated, "target": target}
-
-
-def decide_promotion(
-    candidate: dict, incumbent: dict | None, previous_version: str | None, force: bool
-) -> tuple[bool, str, dict]:
-    """Dua syarat harus TIDAK memburuk - PR-AUC dan Recall@kapasitas - bukan
-    satu skor tunggal. Lihat train.py:decide_promotion() untuk alasan
-    lengkapnya; prinsipnya sama persis di sini.
-
-    Model baru yang lebih buruk tidak otomatis dipakai. Hasil latihnya tetap
-    disimpan untuk dibandingkan, tetapi production tidak ikut turun kualitas.
-    """
-    if incumbent is None:
-        return True, "belum ada model production sebelumnya", {"candidate": candidate}
-
-    comparison = {
-        "candidate": candidate,
-        "incumbent": incumbent,
-        "incumbent_version": previous_version,
-    }
-    pr_ok = candidate["pr_auc"] >= incumbent["pr_auc"]
-    recall_ok = candidate["recall_at_capacity"] >= incumbent["recall_at_capacity"]
-    reason = (
-        f"PR-AUC {candidate['pr_auc']:.4f} vs {previous_version} {incumbent['pr_auc']:.4f} | "
-        f"Recall@kapasitas {candidate['recall_at_capacity']:.4f} vs "
-        f"{incumbent['recall_at_capacity']:.4f} | "
-        f"ROC-AUC {candidate['roc_auc']:.4f} vs {incumbent['roc_auc']:.4f} | "
-        f"Brier {candidate['brier_calibrated']:.4f} vs {incumbent['brier_calibrated']:.4f}"
-    )
-    if pr_ok and recall_ok:
-        return True, reason, comparison
-    if force:
-        return True, f"{reason} - dipaksa lewat --force-promote", comparison
-    return False, reason, comparison
 
 
 def main() -> int:
@@ -371,20 +291,24 @@ def main() -> int:
 
     test_onset = onset[is_test]
     window_days = float((test_onset.max() - test_onset.min()).days) if is_test.sum() else 0.0
-    candidate_metrics = full_metrics(raw, probability, actual, window_days)
+    candidate_metrics = training_utils.full_metrics(
+        raw, probability, actual, window_days,
+        config.SCRAP_CAPACITY_PER_MONTH, days_per_month=30.44,
+    )
 
-    previous = current_version()
+    previous = training_utils.current_version(config.SCRAP_MODEL_DIR)
     incumbent_metrics = None
     if previous is not None:
         incumbent = evaluate_incumbent(previous, dataset, is_test)
-        incumbent_metrics = full_metrics(
-            incumbent["raw"], incumbent["calibrated"], incumbent["target"], window_days
+        incumbent_metrics = training_utils.full_metrics(
+            incumbent["raw"], incumbent["calibrated"], incumbent["target"], window_days,
+            config.SCRAP_CAPACITY_PER_MONTH, days_per_month=30.44,
         )
-    promote, reason, promotion_comparison = decide_promotion(
+    promote, reason, promotion_comparison = training_utils.decide_promotion(
         candidate_metrics, incumbent_metrics, previous, args.force_promote
     )
 
-    version = next_version()
+    version = training_utils.next_version(config.SCRAP_MODEL_DIR)
     directory = config.SCRAP_MODEL_DIR / version
     directory.mkdir(parents=True, exist_ok=True)
     joblib.dump(pipeline, directory / "model.joblib")

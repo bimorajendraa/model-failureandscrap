@@ -12,7 +12,7 @@ import pytest
 
 import data_reader
 import predict as failure_model
-from api import data_state, query_cache
+from inference import data_state, query_cache
 from inference import predictor
 from tests.conftest import needs_database, needs_models
 

@@ -23,20 +23,10 @@ def _int(name: str, default: int) -> int:
         return default
 
 
-# Berapa lama hasil batch scoring dipakai ulang sebelum dihitung ulang.
-# Data sumber hanya bertambah beberapa kali sehari, dan satu kali batch
-# memakan waktu menit-menitan, jadi menghitungnya per request tidak masuk akal.
-BATCH_CACHE_TTL_SECONDS = _int("BATCH_CACHE_TTL_SECONDS", 3600)
-
 # Hitung batch saat aplikasi start (bukan saat request pertama datang).
 WARMUP_BATCH_ON_STARTUP = os.getenv("WARMUP_BATCH_ON_STARTUP", "false").lower() in (
     "1", "true", "yes"
 )
-
-# Seberapa sering batas waktu data diperiksa ulang. Pemeriksaannya satu query
-# ringan, tetapi dipanggil di setiap request - jadi hasilnya ditahan sebentar.
-# Ini juga yang menentukan seberapa cepat data baru terlihat oleh aplikasi.
-DATA_FRESHNESS_TTL_SECONDS = _int("DATA_FRESHNESS_TTL_SECONDS", 60)
 
 # Batas jumlah baris yang boleh diminta sekali panggil.
 MAX_RECOMMENDATION_LIMIT = _int("MAX_RECOMMENDATION_LIMIT", 500)

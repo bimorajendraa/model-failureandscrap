@@ -25,11 +25,14 @@ import numpy as np
 import pytest
 
 import train
-import train_scrap
+import training_utils
 from tests.conftest import needs_database, needs_models
 
 # ---------------------------------------------------------------------------
 # capacity_metrics() / full_metrics() - logic murni, tanpa database
+#
+# train.py dan train_scrap.py sama-sama memakai training_utils, jadi cukup
+# diuji sekali di sini.
 # ---------------------------------------------------------------------------
 
 
@@ -41,42 +44,48 @@ def _synthetic(n: int = 1000, positive_rate: float = 0.05, seed: int = 0):
     return raw, target
 
 
-@pytest.mark.parametrize("module", [train, train_scrap])
-def test_capacity_metrics_menangkap_seluruh_positif_saat_kapasitas_cukup(module):
+def test_capacity_metrics_menangkap_seluruh_positif_saat_kapasitas_cukup():
     """Kalau kapasitas yang dievaluasi >= jumlah positif sungguhan, seluruh
     positif pasti tertangkap - recall harus tepat 1,0, bukan mendekati."""
     raw, target = _synthetic()
     # Window sangat panjang supaya kapasitas jauh melebihi jumlah baris,
     # lalu capacity_metrics() sendiri yang membatasinya ke len(raw).
-    result = module.capacity_metrics(raw, target, window_days=10_000_000.0)
+    result = training_utils.capacity_metrics(raw, target, window_days=10_000_000.0, capacity_per_month=10)
     assert result["capacity_evaluated"] == len(raw)
     assert result["recall_at_capacity"] == pytest.approx(1.0)
 
 
-@pytest.mark.parametrize("module", [train, train_scrap])
-def test_capacity_metrics_kapasitas_minimal_satu(module):
+def test_capacity_metrics_kapasitas_minimal_satu():
     """Window sangat pendek tidak boleh menghasilkan kapasitas nol (pembagian
     dengan nol saat menghitung presisi)."""
     raw, target = _synthetic(n=50)
-    result = module.capacity_metrics(raw, target, window_days=0.01)
+    result = training_utils.capacity_metrics(raw, target, window_days=0.01, capacity_per_month=10)
     assert result["capacity_evaluated"] >= 1
     assert 0.0 <= result["precision_at_capacity"] <= 1.0
 
 
-@pytest.mark.parametrize("module", [train, train_scrap])
-def test_capacity_metrics_kapasitas_tidak_melebihi_jumlah_baris(module):
+def test_capacity_metrics_kapasitas_tidak_melebihi_jumlah_baris():
     raw, target = _synthetic(n=20)
-    result = module.capacity_metrics(raw, target, window_days=100000.0)
+    result = training_utils.capacity_metrics(raw, target, window_days=100000.0, capacity_per_month=10)
     assert result["capacity_evaluated"] <= 20
 
 
-@pytest.mark.parametrize("module", [train, train_scrap])
-def test_full_metrics_berisi_seluruh_metrik_yang_disyaratkan(module):
+def test_capacity_metrics_days_per_month_mempengaruhi_kapasitas():
+    """train.py (30) dan train_scrap.py (30,44) sengaja beda - buktikan
+    parameter ini benar-benar dipakai, bukan cuma default yang diam-diam
+    diabaikan."""
+    raw, target = _synthetic(n=500)
+    result_30 = training_utils.capacity_metrics(raw, target, window_days=180.0, capacity_per_month=10, days_per_month=30.0)
+    result_30_44 = training_utils.capacity_metrics(raw, target, window_days=180.0, capacity_per_month=10, days_per_month=30.44)
+    assert result_30["capacity_evaluated"] >= result_30_44["capacity_evaluated"]
+
+
+def test_full_metrics_berisi_seluruh_metrik_yang_disyaratkan():
     """Master prompt eksplisit meminta PR-AUC, ROC-AUC, Precision/Recall@kapasitas,
     dan Brier - bukan cuma ROC-AUC."""
     raw, target = _synthetic()
     calibrated = raw.copy()
-    result = module.full_metrics(raw, calibrated, target, window_days=180.0)
+    result = training_utils.full_metrics(raw, calibrated, target, window_days=180.0, capacity_per_month=10)
     for key in (
         "roc_auc", "pr_auc", "brier_calibrated",
         "precision_at_capacity", "recall_at_capacity",
@@ -98,57 +107,51 @@ def _metrics(**overrides) -> dict:
     return base
 
 
-@pytest.mark.parametrize("module", [train, train_scrap])
-def test_promosi_pertama_kali_selalu_lolos(module):
-    promote, reason, comparison = module.decide_promotion(_metrics(), None, None, force=False)
+def test_promosi_pertama_kali_selalu_lolos():
+    promote, reason, comparison = training_utils.decide_promotion(_metrics(), None, None, force=False)
     assert promote is True
     assert "belum ada" in reason
 
 
-@pytest.mark.parametrize("module", [train, train_scrap])
-def test_kandidat_lebih_baik_di_kedua_metrik_dipromosikan(module):
+def test_kandidat_lebih_baik_di_kedua_metrik_dipromosikan():
     candidate = _metrics(pr_auc=0.25, recall_at_capacity=0.35)
     incumbent = _metrics(pr_auc=0.20, recall_at_capacity=0.30)
-    promote, reason, comparison = module.decide_promotion(candidate, incumbent, "v1", force=False)
+    promote, reason, comparison = training_utils.decide_promotion(candidate, incumbent, "v1", force=False)
     assert promote is True
     assert comparison["incumbent_version"] == "v1"
 
 
-@pytest.mark.parametrize("module", [train, train_scrap])
-def test_pr_auc_turun_menahan_promosi_walau_recall_naik(module):
+def test_pr_auc_turun_menahan_promosi_walau_recall_naik():
     """ROC-AUC BUKAN satu-satunya dasar - di sini PR-AUC yang menahan promosi
     walau metrik lain membaik, sesuai permintaan eksplisit: jangan
     menjadikan satu metrik sebagai penentu tunggal."""
     candidate = _metrics(pr_auc=0.15, recall_at_capacity=0.40, roc_auc=0.90)
     incumbent = _metrics(pr_auc=0.20, recall_at_capacity=0.30, roc_auc=0.80)
-    promote, reason, comparison = module.decide_promotion(candidate, incumbent, "v1", force=False)
+    promote, reason, comparison = training_utils.decide_promotion(candidate, incumbent, "v1", force=False)
     assert promote is False
 
 
-@pytest.mark.parametrize("module", [train, train_scrap])
-def test_recall_turun_menahan_promosi_walau_pr_auc_naik(module):
+def test_recall_turun_menahan_promosi_walau_pr_auc_naik():
     candidate = _metrics(pr_auc=0.25, recall_at_capacity=0.20)
     incumbent = _metrics(pr_auc=0.20, recall_at_capacity=0.30)
-    promote, reason, comparison = module.decide_promotion(candidate, incumbent, "v1", force=False)
+    promote, reason, comparison = training_utils.decide_promotion(candidate, incumbent, "v1", force=False)
     assert promote is False
 
 
-@pytest.mark.parametrize("module", [train, train_scrap])
-def test_force_promote_memaksa_walau_lebih_buruk(module):
+def test_force_promote_memaksa_walau_lebih_buruk():
     candidate = _metrics(pr_auc=0.10, recall_at_capacity=0.10)
     incumbent = _metrics(pr_auc=0.20, recall_at_capacity=0.30)
-    promote, reason, comparison = module.decide_promotion(candidate, incumbent, "v1", force=True)
+    promote, reason, comparison = training_utils.decide_promotion(candidate, incumbent, "v1", force=True)
     assert promote is True
     assert "dipaksa" in reason
 
 
-@pytest.mark.parametrize("module", [train, train_scrap])
-def test_kandidat_dan_incumbent_identik_dipromosikan(module):
+def test_kandidat_dan_incumbent_identik_dipromosikan():
     """Kandidat yang persis sama dengan incumbent (mis. retrain tanpa data
     baru) harus tetap lolos - bukan tertahan karena perbandingan >= yang
     ketat keliru jadi >."""
     same = _metrics()
-    promote, reason, comparison = module.decide_promotion(same, dict(same), "v1", force=False)
+    promote, reason, comparison = training_utils.decide_promotion(same, dict(same), "v1", force=False)
     assert promote is True
 
 

@@ -37,9 +37,8 @@ import feature_builder
 import predict as failure_model
 import predict_scrap as scrap_model
 import scrap_features
-from api import data_state, settings
-from api.errors import DataSourceUnavailable
-from inference import explanation, recommendation
+from inference import data_state, explanation, recommendation, settings
+from inference.errors import DataSourceUnavailable
 
 _HORIZONS = config.PREDICTION_HORIZON_DAYS
 
@@ -142,8 +141,8 @@ def _compute(generation: int) -> BatchScores:
         data_end=data_end,
         generation=generation,
         model_version={
-            "failure": failure_model._load_model()[2]["model_version"],
-            "scrap": scrap_model._load_model()[2]["model_version"],
+            "failure": failure_model.load_model()[2]["model_version"],
+            "scrap": scrap_model.load_model()[2]["model_version"],
         },
     )
 
@@ -167,12 +166,12 @@ def _score_failure(
     jadi menyimpannya jauh lebih murah daripada membaca ulang database untuk
     satu PART.
     """
-    model, calibrator, metadata = failure_model._load_model()
+    model, calibrator, metadata = failure_model.load_model()
 
     snapshot = feature_builder.current_observations(cycles)
     snapshot = feature_builder.attach_history(snapshot, events)
     snapshot = feature_builder.attach_fleet_snapshot(
-        snapshot, failure_model._fleet_snapshot(data_end)
+        snapshot, failure_model.fleet_snapshot(data_end)
     )
     support = feature_builder.part_model_support(
         snapshot, metadata["part_model_support"]
@@ -205,7 +204,7 @@ def _score_failure(
         result[f"failure_probability_{days}d"] = np.round(cumulative[days], 4)
     # Fungsi milik model sendiri, bukan salinan aturannya.
     result["failure_risk_level"] = [
-        failure_model._risk_level(score, cutoffs) for score in tier_score
+        failure_model.risk_level(score, cutoffs) for score in tier_score
     ]
 
     features_by_item = snapshot[explanation.SOURCE_COLUMNS].copy()
@@ -226,7 +225,7 @@ def _score_scrap(
     data_end: pd.Timestamp,
     items: pd.Series,
 ) -> pd.DataFrame:
-    model, calibrator, metadata = scrap_model._load_model()
+    model, calibrator, metadata = scrap_model.load_model()
 
     state = _scrap_states(events, cycles, data_end, items)
     if state.empty:
@@ -245,7 +244,7 @@ def _score_scrap(
         "item_type": state["item_type_clean"].to_numpy(),
         "scrap_probability": np.round(probability, 4),
         "scrap_risk_level": [
-            scrap_model._risk_level(value, cutoffs) for value in probability
+            scrap_model.risk_level(value, cutoffs) for value in probability
         ],
         "item_type_known_to_model": state["item_type_clean"]
         .isin(metadata["known_item_types"])

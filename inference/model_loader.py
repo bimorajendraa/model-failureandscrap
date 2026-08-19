@@ -12,19 +12,19 @@ from __future__ import annotations
 import config
 import predict as failure_model
 import predict_scrap as scrap_model
-from api.errors import ModelUnavailable
+from inference.errors import ModelUnavailable
 
 
 def failure_metadata() -> dict:
     try:
-        return failure_model._load_model()[2]
+        return failure_model.load_model()[2]
     except FileNotFoundError as error:
         raise ModelUnavailable(str(error)) from error
 
 
 def scrap_metadata() -> dict:
     try:
-        return scrap_model._load_model()[2]
+        return scrap_model.load_model()[2]
     except FileNotFoundError as error:
         raise ModelUnavailable(str(error)) from error
 

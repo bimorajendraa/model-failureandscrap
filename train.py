@@ -28,6 +28,7 @@ from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_s
 import config
 import data_reader
 import feature_builder
+import training_utils
 
 TRAIN, VALIDATION, TEST = "TRAIN", "VALIDATION", "TEST"
 CURRENT_POINTER = config.FAILURE_MODEL_DIR / "CURRENT"
@@ -163,49 +164,6 @@ def train_model(dataset: pd.DataFrame, features: pd.DataFrame) -> tuple:
     return model, calibrator, metrics, raw_test
 
 
-def capacity_metrics(raw: np.ndarray, target: np.ndarray, window_days: float) -> dict:
-    """Precision/recall pada sejumlah PART teratas yang setara kapasitas kerja
-    tim untuk rentang waktu window uji ini.
-
-    Konsisten dengan cara ambang HIGH ditetapkan (choose_cutoffs): bukan
-    precision/recall pada satu ambang probabilitas yang dikarang, melainkan
-    pada JUMLAH yang sanggup ditindaklanjuti tim - diskalakan dari
-    FAILURE_CAPACITY_PER_MONTH ke panjang window uji yang sesungguhnya.
-    """
-    months = max(window_days / 30.0, 1e-9)
-    capacity = max(int(round(config.FAILURE_CAPACITY_PER_MONTH * months)), 1)
-    capacity = min(capacity, len(raw))
-    flagged = np.argsort(-raw)[:capacity]
-    true_positive = int(target[flagged].sum())
-    return {
-        "capacity_evaluated": capacity,
-        "precision_at_capacity": true_positive / capacity if capacity else 0.0,
-        "recall_at_capacity": true_positive / max(int(target.sum()), 1),
-    }
-
-
-def full_metrics(raw: np.ndarray, calibrated: np.ndarray, target: np.ndarray, window_days: float) -> dict:
-    """Satu set metrik yang dipakai SAMA PERSIS untuk kandidat maupun model
-    lama (incumbent), supaya keduanya benar-benar dibandingkan dengan formula
-    yang identik - bukan cuma window waktu yang sama.
-
-    PR-AUC dan Recall@kapasitas dipakai sebagai dasar promosi (lihat
-    decide_promotion); ROC-AUC dan Brier ikut dihitung untuk konteks tetapi
-    bukan penentu tunggal - data ini timpang (base rate kerusakan kecil), dan
-    ROC-AUC bisa terlihat bagus walau presisi pada kapasitas kerja nyata
-    memburuk.
-    """
-    metrics = {
-        "rows": int(len(target)),
-        "positives": int(target.sum()),
-        "roc_auc": float(roc_auc_score(target, raw)),
-        "pr_auc": float(average_precision_score(target, raw)),
-        "brier_calibrated": float(brier_score_loss(target, calibrated)),
-    }
-    metrics.update(capacity_metrics(raw, target, window_days))
-    return metrics
-
-
 def evaluate_incumbent(previous_version: str, dataset: pd.DataFrame) -> dict:
     """Jalankan model CURRENT (bukan kandidat) pada test split yang PERSIS
     SAMA seperti kandidat, supaya keduanya dibandingkan pada window evaluasi
@@ -316,22 +274,6 @@ def _cutoff_for_count(score: np.ndarray, wanted: int) -> float:
     return float(candidates[int(np.argmin(np.abs(counts - wanted)))])
 
 
-def next_version() -> str:
-    existing = [
-        int(path.name[1:])
-        for path in config.FAILURE_MODEL_DIR.glob("v*")
-        if path.is_dir() and path.name[1:].isdigit()
-    ]
-    return f"v{max(existing, default=0) + 1}"
-
-
-def current_version() -> str | None:
-    if not CURRENT_POINTER.exists():
-        return None
-    version = CURRENT_POINTER.read_text(encoding="utf-8").strip()
-    return version if (config.FAILURE_MODEL_DIR / version / "metadata.json").exists() else None
-
-
 def load_metadata(version: str) -> dict:
     path = config.FAILURE_MODEL_DIR / version / "metadata.json"
     return json.loads(path.read_text(encoding="utf-8"))
@@ -403,53 +345,6 @@ def save_version(
     return metadata
 
 
-def decide_promotion(
-    candidate: dict, incumbent: dict | None, previous_version: str | None, force: bool
-) -> tuple[bool, str, dict]:
-    """Boleh tidaknya model baru menggantikan model production.
-
-    Dua syarat harus TIDAK memburuk, bukan satu skor tunggal:
-
-    - PR-AUC: metrik urutan utama untuk data timpang ini (base rate kerusakan
-      kecil) - ROC-AUC sendirian bisa terlihat bagus walau presisi pada
-      kapasitas kerja nyata memburuk.
-    - Recall@kapasitas: yang benar-benar dirasakan tim - dari kerusakan yang
-      sungguh terjadi, berapa persen tertangkap pada jumlah PART yang sanggup
-      diperiksa tim per bulan.
-
-    ROC-AUC dan Brier tetap dihitung dan disimpan untuk konteks/audit, tetapi
-    bukan penentu tunggal. Keduanya (kandidat dan incumbent) dihitung dengan
-    `full_metrics()` yang sama persis pada test split yang sama persis - lihat
-    `evaluate_incumbent()`.
-
-    Model baru yang lebih buruk TIDAK otomatis dipakai - hasil latihnya tetap
-    disimpan supaya bisa dibandingkan, tetapi production tidak ikut turun
-    kualitas hanya karena training ulang sudah dijalankan.
-    """
-    if incumbent is None:
-        return True, "belum ada model production sebelumnya", {"candidate": candidate}
-
-    comparison = {
-        "candidate": candidate,
-        "incumbent": incumbent,
-        "incumbent_version": previous_version,
-    }
-    pr_ok = candidate["pr_auc"] >= incumbent["pr_auc"]
-    recall_ok = candidate["recall_at_capacity"] >= incumbent["recall_at_capacity"]
-    reason = (
-        f"PR-AUC {candidate['pr_auc']:.4f} vs {previous_version} {incumbent['pr_auc']:.4f} | "
-        f"Recall@kapasitas {candidate['recall_at_capacity']:.4f} vs "
-        f"{incumbent['recall_at_capacity']:.4f} | "
-        f"ROC-AUC {candidate['roc_auc']:.4f} vs {incumbent['roc_auc']:.4f} | "
-        f"Brier {candidate['brier_calibrated']:.4f} vs {incumbent['brier_calibrated']:.4f}"
-    )
-    if pr_ok and recall_ok:
-        return True, reason, comparison
-    if force:
-        return True, f"{reason} - dipaksa lewat --force-promote", comparison
-    return False, reason, comparison
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -496,24 +391,26 @@ def main() -> int:
     candidate_features = feature_builder.build_features(test_dataset, candidate_support)
     candidate_raw = model.predict_proba(candidate_features)[:, 1]
     candidate_calibrated = calibrator.predict(candidate_raw)
-    candidate_metrics = full_metrics(
+    candidate_metrics = training_utils.full_metrics(
         candidate_raw, candidate_calibrated,
         test_dataset["target_failure"].astype(bool).to_numpy(), window_days,
+        config.FAILURE_CAPACITY_PER_MONTH,
     )
 
-    previous = current_version()
+    previous = training_utils.current_version(config.FAILURE_MODEL_DIR)
     incumbent_metrics = None
     if previous is not None:
         incumbent = evaluate_incumbent(previous, dataset)
-        incumbent_metrics = full_metrics(
-            incumbent["raw"], incumbent["calibrated"], incumbent["target"], window_days
+        incumbent_metrics = training_utils.full_metrics(
+            incumbent["raw"], incumbent["calibrated"], incumbent["target"], window_days,
+            config.FAILURE_CAPACITY_PER_MONTH,
         )
 
-    promote, reason, comparison = decide_promotion(
+    promote, reason, comparison = training_utils.decide_promotion(
         candidate_metrics, incumbent_metrics, previous, args.force_promote
     )
 
-    version = next_version()
+    version = training_utils.next_version(config.FAILURE_MODEL_DIR)
     save_version(version, model, calibrator, metrics, support_totals, dataset,
                  data_end, cutoffs, cutoff_basis, fleet, comparison)
     print(f"      Tersimpan sebagai {version} di {config.FAILURE_MODEL_DIR / version}")

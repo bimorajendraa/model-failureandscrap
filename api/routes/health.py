@@ -6,9 +6,9 @@ from fastapi import APIRouter
 
 import data_reader
 from api import db_pool
-from api.errors import ModelUnavailable
 from api.schemas import HealthResponse
 from inference import batch_predictor, model_loader
+from inference.errors import ModelUnavailable
 
 router = APIRouter(tags=["health"])
 

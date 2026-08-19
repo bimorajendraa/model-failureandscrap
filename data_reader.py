@@ -716,3 +716,7 @@ ORDER BY f.item_identifier_clean, f.failure_onset_on, f.journey_id
 def _normalize(item_id: str) -> str:
     """Samakan bentuk identifier dengan normalisasi yang dipakai di SQL."""
     return " ".join(str(item_id).strip().upper().split())
+
+
+# Nama publik untuk pemanggil di luar modul ini (inference/).
+normalize = _normalize

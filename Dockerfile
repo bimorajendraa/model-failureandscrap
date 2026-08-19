@@ -12,9 +12,10 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Dependensi disalin lebih dulu supaya layer-nya dipakai ulang selama daftarnya
-# tidak berubah.
-COPY requirements.txt requirements-serving.txt ./
-RUN pip install --no-cache-dir -r requirements-serving.txt
+# tidak berubah. Versi PERSIS (bukan requirements-serving.txt yang rentang)
+# supaya image production reproducible - lihat requirements.lock.txt.
+COPY requirements.lock.txt ./
+RUN pip install --no-cache-dir -r requirements.lock.txt
 
 # Model ikut masuk image: versinya harus persis yang sudah diuji, bukan yang
 # kebetulan ada di host saat container jalan.
