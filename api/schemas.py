@@ -28,6 +28,7 @@ class HealthResponse(BaseModel):
     api_version: str
     model_version: dict[str, str | None]
     database: Literal["reachable", "unreachable", "unchecked"]
+    connection_pool: dict
     batch_cache: dict
 
 

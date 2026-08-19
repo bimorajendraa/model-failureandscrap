@@ -210,6 +210,8 @@ Dokumentasi interaktif: <http://127.0.0.1:8000/docs>
 | `GET /api/v1/overview` | angka ringkas armada + daftar teratas |
 | `GET /api/v1/filters` | nilai filter yang benar-benar ada di data |
 | `GET /api/v1/locations/map` | sebaran risiko per lokasi + koordinat (kalau ada) |
+| `GET /api/v1/monitoring/metrics` | metrik monitoring kedua model (offline dari training + live dari populasi aktif) |
+| `GET /api/v1/monitoring/metrics/failure`, `/scrap` | metrik monitoring satu model saja |
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/parts/011201100101164/assessment
@@ -466,6 +468,34 @@ menggantung lama - lokasi yang belum sempat dicoba diselesaikan pada
 panggilan berikutnya, tombol "Coba cari koordinat lagi" di dashboard memicu
 percobaan lanjutan itu.
 
+### Promosi model: window evaluasi yang adil
+
+`train.py` dan `train_scrap.py` tidak lagi membandingkan skor kandidat dengan
+metrik LAMA yang tersimpan di metadata model production. Itu keliru: metrik
+lama dihitung pada test split model itu SENDIRI saat ia dilatih, dan window
+itu bergeser maju setiap tahun (`test_start` dihitung dari tahun `data_end`)
+- kandidat dan model lama akhirnya dibandingkan pada dua periode yang
+berbeda.
+
+Sekarang model production (incumbent) dijalankan ULANG pada test split yang
+PERSIS SAMA dengan kandidat (`evaluate_incumbent()`), termasuk memakai
+dukungan tipe PART yang DIBEKUKAN miliknya sendiri - bukan dukungan baru
+milik kandidat, supaya keduanya dievaluasi dengan metodologi fitur yang
+identik, bukan hanya periode yang identik.
+
+Promosi butuh **PR-AUC dan Recall@kapasitas-kerja** sama-sama tidak
+memburuk - bukan ROC-AUC sendirian, yang bisa terlihat bagus walau presisi
+pada kapasitas kerja nyata memburuk untuk data yang timpang begini. ROC-AUC
+dan Brier tetap dihitung dan disimpan di `metadata.json["promotion_comparison"]`
+untuk konteks/audit.
+
+```bash
+python train.py            # PR-AUC, ROC-AUC, Recall/Precision@kapasitas, Brier
+                            # dicetak untuk kandidat vs model production,
+                            # dihitung pada window yang sama persis
+python train.py --force-promote   # pakai kandidat walau lebih buruk
+```
+
 ### Versi model
 
 Lapisan serving mengikuti mekanisme versi yang sudah ada - `models/failure/CURRENT`
@@ -494,10 +524,50 @@ train.py / train_scrap.py         model CURRENT
 evaluasi -> models/vN -> CURRENT  FastAPI -> dashboard
 ```
 
+### Production readiness
+
+- **Logging terstruktur** (`api/logging_config.py`) - tanpa ini, log level
+  INFO (model dimuat, batch scoring selesai, potret armada dibuang karena
+  data bertambah) hilang diam-diam; Python hanya punya handler darurat untuk
+  WARNING ke atas. Level diatur lewat `LOG_LEVEL` (bawaan `INFO`).
+- **Connection pooling** (`api/services/db_pool.py`) - `data_reader.connect()`
+  membuka satu koneksi baru per panggilan, benar untuk `predict.py`/`train.py`
+  yang jadi proses CLI sekali pakai, tetapi boros untuk API yang melayani
+  banyak request bersamaan. Ditambal transparan lewat monkeypatch saat API
+  start (pola yang sama dengan `query_cache.py`) - `data_reader.py` sendiri
+  tidak disentuh.
+- **Dependency locking** (`requirements.lock.txt`) - snapshot versi PERSIS
+  dari environment yang sudah diverifikasi 135 test lulus, untuk deployment
+  yang butuh reproduksi environment yang sama persis. `requirements.txt` dan
+  `requirements-serving.txt` tetap memakai rentang versi supaya fleksibel.
+
+### Monitoring foundation
+
+`GET /api/v1/monitoring/metrics` mengirim dua kelompok metrik yang SENGAJA
+tidak dicampur:
+
+- `offline` - hasil evaluasi SAAT TRAINING (PR-AUC, ROC-AUC, Precision/
+  Recall@kapasitas, Brier), dibaca apa adanya dari `metadata.json` model yang
+  sedang production. Berguna sebagai pengaman: kalau `CURRENT` tertukar ke
+  model yang lebih buruk secara manual, angka ini langsung menunjukkannya.
+- `live` - kondisi populasi PART aktif SEKARANG: sebaran skor, jumlah
+  HIGH/MEDIUM dibandingkan dengan yang diharapkan dari training, pangsa PART
+  dengan tipe yang tidak/kurang dikenal model (indikator awal butuh
+  retraining), dan ringkasan fitur numerik utama.
+
+PART yang sedang aktif belum punya label ground-truth (belum diketahui nanti
+benar rusak atau tidak), jadi PR-AUC/ROC-AUC **live** secara matematis tidak
+ada - itu sebabnya dua kelompok ini dipisah tegas, bukan digabung jadi satu
+angka yang menyesatkan.
+
+Ini fondasi, bukan sistem alert atau retraining otomatis - sengaja berhenti
+di "menyediakan angka". Retraining otomatis baru masuk akal setelah
+monitoring ini terbukti stabil.
+
 ### Test
 
 ```bash
-pytest                       # seluruhnya (~2,5 menit, menyentuh database)
+pytest                       # seluruhnya - 135 test, ~6-7 menit, menyentuh database + internet
 pytest tests/test_recommendation.py   # logic murni, tanpa database
 ```
 
@@ -506,7 +576,10 @@ PART tidak ditemukan (404), PART tidak bisa diskor, logic rekomendasi, batch
 scoring, filter/pencarian/paging, CORS, tidak adanya endpoint training,
 kesegaran data (potret armada basi dan cache batch), jumlah pembacaan
 database per request, keempat halaman dashboard yang benar-benar dirender,
-serta - yang terpenting - **kesetaraan single vs batch**.
+peta lokasi (penyaringan geografis + geocoding di-mock), promosi model
+(window evaluasi adil, PR-AUC + Recall@kapasitas), konsistensi kolom fitur,
+pemuatan/reload model, perlindungan kebocoran data masa depan, monitoring
+foundation, serta - yang terpenting - **kesetaraan single vs batch**.
 
 Test yang butuh database di-skip (bukan gagal) kalau database atau model tidak
 tersedia. Di CI itu berbahaya: hasilnya terbaca "semua lulus" padahal tidak

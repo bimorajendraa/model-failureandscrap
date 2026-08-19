@@ -38,6 +38,7 @@ from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
     balanced_accuracy_score,
+    brier_score_loss,
     confusion_matrix,
     precision_score,
     recall_score,
@@ -217,22 +218,94 @@ def current_version() -> str | None:
     return version if (config.SCRAP_MODEL_DIR / version / "metadata.json").exists() else None
 
 
-def decide_promotion(new_score: float, force: bool) -> tuple[bool, str]:
-    """Model baru yang lebih buruk tidak otomatis dipakai. Hasil latihnya tetap
-    disimpan untuk dibandingkan, tetapi production tidak ikut turun kualitas."""
-    previous = current_version()
-    if previous is None:
-        return True, "belum ada model production sebelumnya"
+def capacity_metrics(raw: np.ndarray, target: np.ndarray, window_days: float) -> dict:
+    """Precision/recall pada sejumlah kerusakan teratas yang setara kapasitas
+    kerja tim untuk panjang window uji ini - sama prinsipnya dengan
+    train.py:capacity_metrics(), supaya kedua model dibandingkan dengan cara
+    yang konsisten."""
+    months = max(window_days / 30.44, 1e-9)
+    capacity = max(int(round(config.SCRAP_CAPACITY_PER_MONTH * months)), 1)
+    capacity = min(capacity, len(raw))
+    flagged = np.argsort(-raw)[:capacity]
+    true_positive = int(target[flagged].sum())
+    return {
+        "capacity_evaluated": capacity,
+        "precision_at_capacity": true_positive / capacity if capacity else 0.0,
+        "recall_at_capacity": true_positive / max(int(target.sum()), 1),
+    }
+
+
+def full_metrics(raw: np.ndarray, calibrated: np.ndarray, target: np.ndarray, window_days: float) -> dict:
+    """Satu set metrik yang dipakai SAMA PERSIS untuk kandidat maupun model
+    lama (incumbent) - lihat train.py:full_metrics() untuk alasannya."""
+    metrics = {
+        "rows": int(len(target)),
+        "positives": int(target.sum()),
+        "roc_auc": float(roc_auc_score(target, raw)),
+        "pr_auc": float(average_precision_score(target, raw)),
+        "brier_calibrated": float(brier_score_loss(target, calibrated)),
+    }
+    metrics.update(capacity_metrics(raw, target, window_days))
+    return metrics
+
+
+def evaluate_incumbent(previous_version: str, dataset: pd.DataFrame, is_test: np.ndarray) -> dict:
+    """Jalankan model CURRENT (bukan kandidat) pada test split yang PERSIS
+    SAMA seperti kandidat - lihat penjelasan lengkap di
+    train.py:evaluate_incumbent(). Masalahnya sama: metrik lama tersimpan
+    dari window uji SCRAP_TEST_START pada saat model lama dilatih, sementara
+    data terus bertambah - membandingkannya apa adanya bukan perbandingan
+    yang adil.
+    """
     metadata = json.loads(
-        (config.SCRAP_MODEL_DIR / previous / "metadata.json").read_text(encoding="utf-8")
+        (config.SCRAP_MODEL_DIR / previous_version / "metadata.json").read_text(encoding="utf-8")
     )
-    old_score = metadata["evaluation_metrics"]["pr_auc"]
-    comparison = f"PR-AUC uji {new_score:.4f} vs {previous} {old_score:.4f}"
-    if new_score >= old_score:
-        return True, comparison
+    pipeline = joblib.load(config.SCRAP_MODEL_DIR / previous_version / "model.joblib")
+    calibrator = joblib.load(config.SCRAP_MODEL_DIR / previous_version / "calibrator.joblib")
+
+    test_dataset = dataset.loc[is_test]
+    # Kategori jenis PART pakai known_item_types BEKU milik model lama -
+    # persis yang dipakai predict_scrap.py - bukan yang baru dihitung untuk
+    # kandidat.
+    test_features = scrap_features.build_features(test_dataset, metadata["known_item_types"])
+    raw = pipeline.predict_proba(test_features)[:, 1]
+    calibrated = calibrator.predict_proba(raw.reshape(-1, 1))[:, 1]
+    target = test_dataset["is_scrap"].to_numpy()
+    return {"model_version": previous_version, "raw": raw, "calibrated": calibrated, "target": target}
+
+
+def decide_promotion(
+    candidate: dict, incumbent: dict | None, previous_version: str | None, force: bool
+) -> tuple[bool, str, dict]:
+    """Dua syarat harus TIDAK memburuk - PR-AUC dan Recall@kapasitas - bukan
+    satu skor tunggal. Lihat train.py:decide_promotion() untuk alasan
+    lengkapnya; prinsipnya sama persis di sini.
+
+    Model baru yang lebih buruk tidak otomatis dipakai. Hasil latihnya tetap
+    disimpan untuk dibandingkan, tetapi production tidak ikut turun kualitas.
+    """
+    if incumbent is None:
+        return True, "belum ada model production sebelumnya", {"candidate": candidate}
+
+    comparison = {
+        "candidate": candidate,
+        "incumbent": incumbent,
+        "incumbent_version": previous_version,
+    }
+    pr_ok = candidate["pr_auc"] >= incumbent["pr_auc"]
+    recall_ok = candidate["recall_at_capacity"] >= incumbent["recall_at_capacity"]
+    reason = (
+        f"PR-AUC {candidate['pr_auc']:.4f} vs {previous_version} {incumbent['pr_auc']:.4f} | "
+        f"Recall@kapasitas {candidate['recall_at_capacity']:.4f} vs "
+        f"{incumbent['recall_at_capacity']:.4f} | "
+        f"ROC-AUC {candidate['roc_auc']:.4f} vs {incumbent['roc_auc']:.4f} | "
+        f"Brier {candidate['brier_calibrated']:.4f} vs {incumbent['brier_calibrated']:.4f}"
+    )
+    if pr_ok and recall_ok:
+        return True, reason, comparison
     if force:
-        return True, f"{comparison} - dipaksa lewat --force-promote"
-    return False, comparison
+        return True, f"{reason} - dipaksa lewat --force-promote", comparison
+    return False, reason, comparison
 
 
 def main() -> int:
@@ -296,6 +369,21 @@ def main() -> int:
         "confusion_matrix": confusion_matrix(actual, predicted).tolist(),
     }
 
+    test_onset = onset[is_test]
+    window_days = float((test_onset.max() - test_onset.min()).days) if is_test.sum() else 0.0
+    candidate_metrics = full_metrics(raw, probability, actual, window_days)
+
+    previous = current_version()
+    incumbent_metrics = None
+    if previous is not None:
+        incumbent = evaluate_incumbent(previous, dataset, is_test)
+        incumbent_metrics = full_metrics(
+            incumbent["raw"], incumbent["calibrated"], incumbent["target"], window_days
+        )
+    promote, reason, promotion_comparison = decide_promotion(
+        candidate_metrics, incumbent_metrics, previous, args.force_promote
+    )
+
     version = next_version()
     directory = config.SCRAP_MODEL_DIR / version
     directory.mkdir(parents=True, exist_ok=True)
@@ -328,6 +416,10 @@ def main() -> int:
         "rows": {"total": int(len(dataset)), "scrap": int(target.sum())},
         "model_comparison": comparison.to_dict(orient="records"),
         "evaluation_metrics": metrics,
+        # Perbandingan lengkap yang dipakai keputusan promosi - PR-AUC,
+        # Recall@kapasitas, ROC-AUC, Brier, keduanya dihitung pada test split
+        # yang SAMA PERSIS. Disimpan untuk audit; lihat decide_promotion().
+        "promotion_comparison": promotion_comparison,
         "limitations": [
             "Kejadian scrap sedikit - metrik uji berisik dan rentang ketidakpastiannya lebar.",
             "Kerusakan tanpa vonis DAN tidak pernah dipasang lagi tidak bisa dilabeli, jadi tidak dipelajari.",
@@ -347,12 +439,27 @@ def main() -> int:
           f"balanced={metrics['balanced_accuracy']:.1%}  "
           f"presisi={metrics['precision']:.1%}  recall={metrics['recall']:.1%}")
 
-    promote, reason = decide_promotion(metrics["pr_auc"], args.force_promote)
+    if incumbent_metrics is not None:
+        print(
+            f"\n      Perbandingan pada window uji yang sama ({window_days:.0f} hari, "
+            f"kapasitas setara {candidate_metrics['capacity_evaluated']} kerusakan):"
+        )
+        print(
+            f"      {'':10s} {'PR-AUC':>8s} {'ROC-AUC':>8s} {'Recall@cap':>11s} "
+            f"{'Precision@cap':>14s} {'Brier':>8s}"
+        )
+        for label, values in (("kandidat", candidate_metrics), (previous, incumbent_metrics)):
+            print(
+                f"      {label:10s} {values['pr_auc']:>8.4f} {values['roc_auc']:>8.4f} "
+                f"{values['recall_at_capacity']:>11.4f} {values['precision_at_capacity']:>14.4f} "
+                f"{values['brier_calibrated']:>8.4f}"
+            )
+
     if promote:
         CURRENT_POINTER.write_text(version, encoding="utf-8")
         print(f"\n[OK] {version} dipakai sebagai model production ({reason}).")
     else:
-        print(f"\n[TAHAN] Model production TETAP {current_version()} - {reason}.\n"
+        print(f"\n[TAHAN] Model production TETAP {previous} - {reason}.\n"
               f"        {version} tetap tersimpan untuk dibandingkan.")
     return 0
 

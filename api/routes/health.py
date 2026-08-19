@@ -7,7 +7,7 @@ from fastapi import APIRouter
 import data_reader
 from api.errors import ModelUnavailable
 from api.schemas import HealthResponse
-from api.services import batch_service, model_registry
+from api.services import batch_service, db_pool, model_registry
 
 router = APIRouter(tags=["health"])
 
@@ -46,6 +46,7 @@ def health(check_database: bool = False) -> dict:
         "api_version": API_VERSION,
         "model_version": versions,
         "database": database,
+        "connection_pool": db_pool.stats(),
         "batch_cache": {
             "ready": cached is not None,
             "rows": int(len(cached.frame)) if cached else 0,

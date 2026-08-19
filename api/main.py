@@ -23,16 +23,17 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api import settings
+from api import logging_config, settings
 from api.errors import (
     DataSourceUnavailable,
     ModelUnavailable,
     PartNotFound,
     PartNotScorable,
 )
-from api.routes import health, locations, model_info, prediction, recommendations
-from api.services import batch_service, model_registry
+from api.routes import health, locations, model_info, monitoring, prediction, recommendations
+from api.services import batch_service, db_pool, model_registry
 
+logging_config.setup()
 logger = logging.getLogger("production_ml.api")
 
 DESCRIPTION = """
@@ -51,7 +52,10 @@ API risiko kerusakan dan risiko scrap untuk PART.
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Muat model sekali saat start, bukan setiap request."""
+    """Muat model dan siapkan connection pool sekali saat start, bukan
+    setiap request."""
+    db_pool.install()
+
     try:
         model_registry.warmup()
         logger.info("Model dimuat: %s", model_registry.versions())
@@ -66,6 +70,9 @@ async def lifespan(app: FastAPI):
         except Exception as error:  # noqa: BLE001 - start tidak boleh gagal karenanya
             logger.error("Batch scoring awal gagal: %s", error)
 
+    # Pool database TIDAK ditutup di sini - lihat penjelasan di
+    # db_pool.install(). Pada proses production sesungguhnya (satu siklus
+    # hidup per proses), OS membereskan soket saat proses keluar.
     yield
 
 
@@ -95,6 +102,7 @@ app.include_router(model_info.router)
 app.include_router(prediction.router)
 app.include_router(recommendations.router)
 app.include_router(locations.router)
+app.include_router(monitoring.router)
 
 
 # ---------------------------------------------------------------------------
