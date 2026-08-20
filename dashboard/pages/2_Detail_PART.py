@@ -11,7 +11,7 @@ ui.page_setup("Detail PART")
 ui.sidebar_status()
 
 st.title("Detail PART")
-st.caption("Masukkan Item ID. Seluruh fitur ML dibangun otomatis dari riwayat PART.")
+st.caption("Masukkan Item ID. Fitur ML dibangun dari riwayat PART ataupun TERMINAL.")
 
 default_item_id = st.session_state.pop("detail_item_id", "")
 

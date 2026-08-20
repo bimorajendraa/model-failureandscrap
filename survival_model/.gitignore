@@ -1,0 +1,5 @@
+# Artifact model besar (RandomSurvivalForest menyimpan kurva survival per
+# leaf node - ratusan MB bahkan setelah dikecilkan, lihat README) - regenerable
+# lewat `python train.py`. metadata.json (kecil, berisi metrik & konfigurasi)
+# tetap dilacak supaya hasil training bisa direview tanpa menjalankan ulang.
+artifacts/*.joblib

@@ -297,10 +297,11 @@ prediction_service.get_part_assessment(item_id)
 
 Recommendation engine (`inference/recommendation.py`) **tidak punya
 ambang sendiri**. Masukannya hanya kelompok risiko yang sudah ditetapkan
-model - ambang angkanya berasal dari kapasitas kerja tim yang dibekukan saat
-training (`FAILURE_CAPACITY_PER_MONTH`, `SCRAP_CAPACITY_PER_MONTH` di
-`config.py`). Isinya satu tabel keputusan supaya seluruh aturan terlihat
-sekaligus dan mudah diganti.
+model - ambang angkanya dibekukan saat training: risiko kerusakan dari
+probabilitas 30-hari tetap (`FAILURE_HIGH_PROBABILITY_THRESHOLD`,
+`FAILURE_MEDIUM_PROBABILITY_THRESHOLD`), risiko scrap dari kapasitas kerja
+tim (`SCRAP_CAPACITY_PER_MONTH`) - keduanya di `config.py`. Isinya satu tabel
+keputusan supaya seluruh aturan terlihat sekaligus dan mudah diganti.
 
 | Risiko kerusakan | Risiko scrap | Prioritas | Tindakan |
 |---|---|---|---|
@@ -347,8 +348,8 @@ dilayani dalam hitungan milidetik tanpa menghitung ulang.
 `feature_builder` dan model yang sama, sehingga hasilnya wajib identik - bukan
 sekadar mirip. `tests/test_parity.py` membandingkan probabilitas keempat
 horizon, kelompok risiko, dan probabilitas scrap secara persis, dan memeriksa
-bahwa populasi yang diskor batch sama dengan populasi yang dipakai `train.py`
-saat menyetel ambang HIGH (16.877 PART, 200 di antaranya HIGH).
+bahwa jumlah PART aktif dan jumlah HIGH pada batch sama dengan yang dicatat
+`train.py` di metadata saat model dilatih.
 
 Satu-satunya bagian yang ditulis ulang untuk batch adalah penyusunan kolom
 mentah scrap (`scrap_features.current_state()` hanya melayani satu PART per
@@ -837,22 +838,34 @@ asumsi tersebut.
 
 ### Kelompok risiko
 
-Dibandingkan terhadap base rate validasi (frekuensi kerusakan historis
-sungguhan), bukan ambang karangan:
-
-Satu angka yang mengatur semuanya, di `config.py`:
+Ambang tetap pada probabilitas kerusakan 30-hari yang sudah dikalibrasi -
+angka yang sama persis dengan yang dibaca pengguna di layar, di `config.py`:
 
 ```python
-FAILURE_CAPACITY_PER_MONTH = 200   # berapa PART/bulan yang sanggup diprioritaskan
+FAILURE_HIGH_PROBABILITY_THRESHOLD = 0.25
+FAILURE_MEDIUM_PROBABILITY_THRESHOLD = 0.15
 ```
 
-Seluruh PART aktif diurutkan menurut risiko, lalu sebanyak kapasitas itulah
-yang masuk `HIGH`. Karena tiap PART dinilai ulang tiap 30 hari, jumlah PART di
-daftar `HIGH` pada satu saat sama dengan beban kerja per bulan. Hasilnya pada
-16.877 PART aktif: **200 HIGH, 200 MEDIUM, 16.477 LOW** - tepat sesuai
-kapasitas.
+**Ini bukan angka dari research** - keputusan operasional yang diambil setelah
+memeriksa sebaran probabilitas seluruh armada aktif sungguhan (~16.900 PART).
+Base rate kerusakan model ini rendah: PART paling berisiko sekalipun di
+seluruh armada jarang melewati ~27% pada horizon 30 hari. Konsekuensinya
+disadari sejak awal - jumlah PART yang ter-flag HIGH/MEDIUM jauh di bawah
+kapasitas kerja tim (~200/bulan sebelumnya) dan bisa naik-turun signifikan
+dari bulan ke bulan mengikuti kondisi armada, tidak lagi tetap sejumlah
+kapasitas seperti sistem sebelumnya (lihat bagian "Kapasitas kerja tim" di
+bawah untuk sistem lama, yang tetap dipakai mengevaluasi kualitas model saat
+retrain, hanya bukan lagi dasar kelompok risiko).
 
-Pilihan lain, diukur di data uji 2026:
+### Kapasitas kerja tim (untuk evaluasi model, bukan kelompok risiko)
+
+`FAILURE_CAPACITY_PER_MONTH` di `config.py` **tidak lagi** menentukan ambang
+HIGH/MEDIUM di atas - sekarang hanya dipakai `training_utils.py` untuk
+menghitung Recall/Precision@kapasitas saat membandingkan model kandidat
+dengan model production ketika retrain (lihat `decide_promotion()` di
+`train.py`). Angka ini mengukur "seandainya tim cuma bisa menindaklanjuti N
+PART/bulan, seberapa banyak kerusakan sungguhan yang tertangkap" - metrik
+kualitas model, terpisah dari kelompok risiko yang ditampilkan ke pengguna.
 
 | Kapasitas/bln | Presisi | Tertangkap | Berapa kali lebih tepat |
 |---|---|---|---|
@@ -863,20 +876,7 @@ Pilihan lain, diukur di data uji 2026:
 | 800 | 7,4% | 633 dari 902 | 3,2x |
 
 200/bulan dipilih karena **setara dengan aturan lama yang sudah tervalidasi di
-research** (>=3x base rate validasi: presisi 16,6%, recall 36,6%). Jadi
-perilakunya tidak berubah - yang berubah cara menyetelnya, dari kelipatan
-statistik menjadi angka kapasitas yang bisa dibicarakan dengan tim operasional.
-
-### Kenapa batas kelompok memakai skor mentah
-
-Batas `HIGH`/`MEDIUM` dibandingkan terhadap **skor mentah model**, bukan
-probabilitas terkalibrasi yang ditampilkan ke pengguna. Alasannya teknis:
-kalibrator menghasilkan dataran, sehingga 16.877 PART hanya menempati sekitar
-30 nilai probabilitas berbeda - jumlah PART yang tertandai melompat dari 97
-langsung ke 303, tidak ada nilai di antaranya. Skor mentah punya ribuan nilai
-berbeda dengan **urutan yang sama persis**, jadi batas bisa ditaruh tepat
-sesuai kapasitas. Probabilitas terkalibrasi tetap yang dilaporkan, karena itu
-angka yang bermakna untuk dibaca.
+research** (>=3x base rate validasi: presisi 16,6%, recall 36,6%).
 
 ---
 
@@ -1126,7 +1126,8 @@ karena itulah yang dipakai saat model belajar.
 
 ## Asal-usul setiap konstanta
 
-Tidak ada angka yang dikarang. Semuanya dari hasil research yang sudah diuji:
+Hampir semua angka di bawah berasal dari hasil research yang sudah diuji;
+pengecualiannya ditandai eksplisit di kolom Asal:
 
 | Konstanta | Nilai | Asal |
 |---|---|---|
@@ -1135,7 +1136,8 @@ Tidak ada angka yang dikarang. Semuanya dari hasil research yang sudah diuji:
 | Horizon target | 30 hari | model resmi research |
 | Ambang dukungan tipe PART | 300 observasi | rare-category ablation |
 | Batas kelompok umur | 91/181/366/731/1461 hari | definisi fitur SQL research |
-| Ambang risiko | 3x dan 1x base rate validasi | diuji pada data uji 2026 |
+| Ambang risiko kerusakan (HIGH/MEDIUM) | 25% / 15% probabilitas 30-hari | **bukan dari research** - keputusan operasional, dipilih dari sebaran probabilitas armada aktif sungguhan |
+| Ambang risiko scrap | 3x dan 1x base rate validasi | diuji pada data uji 2026 |
 | Ambang fuzzy | skor >= 0,90 dan selisih >= 0,08 | aturan pencocokan research |
 | Alias lokasi disetujui | GUDANG NUTECH -> GUDANG NI | sudah diverifikasi reviewer research |
 | Singkatan | JKT -> JAKARTA | sudah diverifikasi reviewer research |

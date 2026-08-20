@@ -207,71 +207,41 @@ def evaluate_incumbent(previous_version: str, dataset: pd.DataFrame) -> dict:
 
 
 def active_part_scores(
-    model, cycles: pd.DataFrame, events: pd.DataFrame, support_totals: dict[str, int],
-    episodes: pd.DataFrame, fleet: pd.DataFrame,
+    model, calibrator, cycles: pd.DataFrame, events: pd.DataFrame,
+    support_totals: dict[str, int], episodes: pd.DataFrame, fleet: pd.DataFrame,
 ) -> np.ndarray:
-    """Skor MENTAH seluruh PART yang saat ini masih terpasang.
-
-    Dua alasan memakai skor mentah, bukan probabilitas terkalibrasi:
-
-    1. Populasinya harus yang sebenarnya dihadapi production - seluruh PART
-       aktif - bukan grid observasi data latih yang sudah tersaring aturan
-       kelayakan label dan jumlahnya jauh lebih sedikit.
-    2. Kalibrator menghasilkan dataran: 16.877 PART hanya menempati sekitar
-       30 nilai probabilitas berbeda, sehingga jumlah PART yang tertandai
-       melompat dari 97 langsung ke 303 tanpa nilai di antaranya. Skor mentah
-       punya ribuan nilai berbeda dengan URUTAN YANG SAMA PERSIS, jadi batas
-       kelompok bisa ditaruh tepat sesuai kapasitas.
+    """Peluang kerusakan 30 hari (terkalibrasi) seluruh PART yang saat ini
+    masih terpasang - populasi produksi sesungguhnya yang dihadapi predict.py,
+    bukan grid observasi data latih yang sudah tersaring aturan kelayakan
+    label dan jumlahnya jauh lebih sedikit.
     """
     snapshot = feature_builder.current_observations(cycles)
     snapshot = feature_builder.attach_history(snapshot, events)
     snapshot = feature_builder.attach_fleet_snapshot(snapshot, fleet)
     support = feature_builder.part_model_support(snapshot, support_totals)
     features = feature_builder.build_features(snapshot, support)
-    return model.predict_proba(features)[:, 1]
+    raw = model.predict_proba(features)[:, 1]
+    return calibrator.predict(raw)
 
 
-def choose_cutoffs(active_score: np.ndarray) -> tuple[dict, dict]:
-    """Ambang kelompok risiko diturunkan dari KAPASITAS KERJA bisnis.
-
-    Seluruh PART aktif diurutkan menurut risiko, lalu sebanyak kapasitas per
-    bulan itulah yang masuk kelompok HIGH. Karena tiap PART dinilai ulang
-    setiap 30 hari, jumlah PART di daftar HIGH pada satu saat sama dengan
-    beban kerja per bulan.
-
-    Tidak ada label yang dipakai di sini - hanya urutan skor - jadi tidak ada
-    kebocoran dari data uji.
+def choose_cutoffs(calibrated_30d_score: np.ndarray) -> tuple[dict, dict]:
+    """Ambang kelompok risiko: nilai tetap FAILURE_HIGH/MEDIUM_PROBABILITY_
+    THRESHOLD (config.py) pada probabilitas kerusakan 30-hari yang sudah
+    dikalibrasi - angka yang sama persis dengan yang dibaca pengguna di layar.
     """
-    high = _cutoff_for_count(active_score, config.FAILURE_CAPACITY_PER_MONTH)
-    medium = _cutoff_for_count(
-        active_score,
-        int(config.FAILURE_MEDIUM_CAPACITY_MULTIPLIER * config.FAILURE_CAPACITY_PER_MONTH),
-    )
+    high = config.FAILURE_HIGH_PROBABILITY_THRESHOLD
+    medium = config.FAILURE_MEDIUM_PROBABILITY_THRESHOLD
     cutoffs = {"high": high, "medium": medium}
     basis = {
-        "rule": "kapasitas kerja per bulan yang ditetapkan bisnis",
-        "scale": "skor mentah model, bukan probabilitas terkalibrasi",
-        "capacity_per_month": config.FAILURE_CAPACITY_PER_MONTH,
-        "active_parts_scored": int(len(active_score)),
-        # Jumlah yang benar-benar tercapai bisa meleset dari kapasitas karena
-        # kalibrator menghasilkan banyak skor kembar - lihat _cutoff_for_count.
-        "flagged_high": int((active_score >= high).sum()),
-        "flagged_medium_band": int(((active_score >= medium) & (active_score < high)).sum()),
+        "rule": "ambang probabilitas 30-hari tetap",
+        "scale": "probabilitas kerusakan 30 hari terkalibrasi - sama seperti yang ditampilkan ke pengguna",
+        "active_parts_scored": int(len(calibrated_30d_score)),
+        "flagged_high": int((calibrated_30d_score >= high).sum()),
+        "flagged_medium_band": int(
+            ((calibrated_30d_score >= medium) & (calibrated_30d_score < high)).sum()
+        ),
     }
     return cutoffs, basis
-
-
-def _cutoff_for_count(score: np.ndarray, wanted: int) -> float:
-    """Ambang yang jumlah PART tertandainya paling dekat dengan `wanted`.
-
-    Tidak memakai kuantil biasa karena kalibrator menghasilkan dataran skor:
-    banyak PART punya nilai persis sama, sehingga menggeser ambang sedikit
-    saja bisa menarik ratusan PART sekaligus. Mencari di antara nilai skor
-    yang benar-benar ada membuat jumlahnya sedekat mungkin dengan kapasitas.
-    """
-    candidates = np.unique(score)
-    counts = np.array([(score >= value).sum() for value in candidates])
-    return float(candidates[int(np.argmin(np.abs(counts - wanted)))])
 
 
 def load_metadata(version: str) -> dict:
@@ -359,7 +329,7 @@ def main() -> int:
     model, calibrator, metrics, raw_test = train_model(dataset, features)
     fleet = feature_builder.fleet_snapshot(cycles, episodes, data_end)
     cutoffs, cutoff_basis = choose_cutoffs(
-        active_part_scores(model, cycles, events, support_totals, episodes, fleet))
+        active_part_scores(model, calibrator, cycles, events, support_totals, episodes, fleet))
 
     print("[5/5] Menyimpan dan mengevaluasi promosi...")
     for name in ("train", "validation", "test"):

@@ -91,8 +91,3 @@ ui.priority_table(
     ],
 )
 ui.probability_caption()
-
-st.caption(
-    "Buka halaman **Detail PART** dan masukkan Item ID untuk melihat faktor "
-    "risiko di balik angkanya."
-)

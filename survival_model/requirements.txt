@@ -1,0 +1,19 @@
+# Tambahan khusus eksperimen survival - terpisah dari requirements.txt utama
+# supaya training/prediction model classification production tidak perlu
+# memasang library ini.
+#
+# scikit-survival butuh scikit-learn<1.10,>=1.9.0 (root requirements.txt
+# memakai rentang >=1.5,<2 yang kompatibel).
+#
+# CATATAN INSTALASI (Windows): scikit-survival punya extra opsional untuk
+# SurvivalSVM yang butuh `osqp`/`ecos`, dan `ecos` butuh compiler C++ yang
+# umumnya tidak terpasang di mesin Windows biasa. Modul itu TIDAK dipakai di
+# eksperimen ini (hanya RandomSurvivalForest + CoxPHSurvivalAnalysis, yang
+# tidak butuh osqp/ecos sama sekali), jadi pasang dengan:
+#
+#   pip install --no-deps scikit-survival numexpr
+#
+# bukan `pip install scikit-survival` biasa (itu akan mencoba build ecos dari
+# source dan gagal tanpa Microsoft C++ Build Tools).
+scikit-survival==0.28.0
+numexpr>=2.10

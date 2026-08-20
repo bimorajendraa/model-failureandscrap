@@ -1,0 +1,77 @@
+"""Metrik evaluasi survival NATIVE (Lapis 1 - README bagian Evaluasi):
+C-index, Integrated Brier Score, Brier per horizon, time-dependent AUC.
+Semua lewat scikit-survival langsung, tidak ada rumus custom.
+
+Horizon yang melebihi window follow-up TRAIN/eval TIDAK dipaksakan - kalau
+sksurv menolak (ValueError, khas untuk horizon yang melebihi rentang data),
+horizon itu dilaporkan sebagai "tidak dapat dihitung" (dict kosong/None),
+bukan diam-diam dilewati atau membuat evaluasi gagal total.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+from sksurv.metrics import brier_score, concordance_index_censored, cumulative_dynamic_auc, integrated_brier_score
+
+from . import utils
+
+HORIZONS_DAYS = [30, 60, 90, 120]
+
+
+def _usable_horizons(y_train, y_eval, horizons: list[int] = HORIZONS_DAYS) -> list[int]:
+    """Horizon aman untuk IBS/Brier/AUC: harus lebih pendek dari follow-up
+    maksimum TRAIN maupun follow-up eval, dan lebih besar dari follow-up
+    minimum eval (syarat estimasi IPCW di scikit-survival)."""
+    max_train = float(y_train["time"].max())
+    max_eval = float(y_eval["time"].max())
+    min_eval = float(y_eval["time"].min())
+    limit = min(max_train, max_eval)
+    return [h for h in horizons if min_eval < h < limit]
+
+
+def native_metrics(model, y_train, x_eval, y_eval) -> dict:
+    """C-index + (kalau follow-up cukup panjang) IBS/Brier/AUC per horizon
+    30/60/90/120 hari, dievaluasi dari t=0=installed_on - cara standar
+    survival dievaluasi, BUKAN metrik operasional 30-hari (itu Lapis 2,
+    lihat evaluate.py compare_with_classification())."""
+    risk = model.predict(x_eval)
+    c_index = concordance_index_censored(y_eval["event"], y_eval["time"], risk)[0]
+
+    result: dict = {
+        "rows": int(len(y_eval)),
+        "events": int(y_eval["event"].sum()),
+        "c_index": float(c_index),
+        "max_followup_days": float(y_eval["time"].max()),
+    }
+
+    horizons = _usable_horizons(y_train, y_eval)
+    result["horizons_evaluable_days"] = horizons
+    if not horizons:
+        result["integrated_brier_score"] = None
+        result["brier_at_horizon"] = {}
+        result["time_dependent_auc_at_horizon"] = {}
+        return result
+
+    times_grid, curves = utils.survival_curve_arrays(model, x_eval)
+    surv_at_horizons = utils.step_eval_matrix(times_grid, curves, horizons)
+
+    try:
+        result["integrated_brier_score"] = float(
+            integrated_brier_score(y_train, y_eval, surv_at_horizons, horizons)
+        )
+    except ValueError:
+        result["integrated_brier_score"] = None
+
+    try:
+        _, brier_scores = brier_score(y_train, y_eval, surv_at_horizons, horizons)
+        result["brier_at_horizon"] = {int(h): float(b) for h, b in zip(horizons, brier_scores)}
+    except ValueError:
+        result["brier_at_horizon"] = {}
+
+    try:
+        auc_scores, _ = cumulative_dynamic_auc(y_train, y_eval, risk, horizons)
+        result["time_dependent_auc_at_horizon"] = {int(h): float(a) for h, a in zip(horizons, auc_scores)}
+    except ValueError:
+        result["time_dependent_auc_at_horizon"] = {}
+
+    return result

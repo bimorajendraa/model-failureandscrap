@@ -2,9 +2,9 @@
 
 BUKAN model, dan sengaja tidak memakai ambang sendiri. Satu-satunya masukan
 adalah kelompok risiko (LOW/MEDIUM/HIGH) yang sudah ditetapkan model - ambang
-angkanya ditentukan saat training dari kapasitas kerja tim (lihat config.py
-FAILURE_CAPACITY_PER_MONTH dan SCRAP_CAPACITY_PER_MONTH), bukan dikarang di
-lapisan ini.
+angkanya ditentukan saat training (lihat config.py: FAILURE_HIGH/MEDIUM_
+PROBABILITY_THRESHOLD untuk kerusakan, SCRAP_CAPACITY_PER_MONTH untuk risiko
+rusak total), bukan dikarang di lapisan ini.
 
 Isinya satu tabel keputusan supaya seluruh aturan terlihat sekaligus dan bisa
 diganti tanpa menyentuh kode lain.

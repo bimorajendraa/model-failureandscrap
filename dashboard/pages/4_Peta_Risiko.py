@@ -53,14 +53,6 @@ if pending:
         "lokasi yang sudah pernah dicoba tidak diulang."
     )
 
-st.caption(
-    "Koordinat dari OpenStreetMap, hanya untuk nama yang berpola stasiun "
-    "kereta publik (\"STASIUN ...\" atau \"... (KA BANDARA)\") dan hasilnya "
-    "harus berada di area Jabodetabek. Nama fasilitas internal (gudang, depo, "
-    "service center) sengaja tidak dicoba - risikonya salah tempat, bukan "
-    "sekadar tidak ketemu."
-)
-
 if resolved:
     st.divider()
     st.subheader("Peta")

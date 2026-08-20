@@ -1,0 +1,244 @@
+{
+  "training_date": "2026-08-20T05:40:33.362662+00:00",
+  "data_end": "2026-08-03 11:07:22",
+  "primary_model": "random_survival_forest",
+  "unit_of_observation": "one row per installation lifecycle (episode), features anchored at installed_on (cycle start) - NOT current PART condition",
+  "target": "duration_days (time from installed_on to failure/censoring), event_observed (1=failure, 0=censored)",
+  "feature_columns": [
+    "part_model_category",
+    "client_category",
+    "log_total_prior_events",
+    "log_prior_failure_count",
+    "has_prior_failure",
+    "log_prior_corrective_count",
+    "has_prior_corrective",
+    "log_days_since_last_corrective",
+    "log_prior_distinct_places",
+    "log_prior_corrective_30d",
+    "log_prior_failure_365d",
+    "log_prior_events_180d",
+    "log_previous_cycle_lifetime_mean",
+    "has_previous_cycle",
+    "month_sin",
+    "month_cos",
+    "log_model_failures_90d",
+    "model_failure_rate_90d",
+    "log_model_fleet_size"
+  ],
+  "categorical_features": [
+    "part_model_category",
+    "client_category"
+  ],
+  "dropped_from_classification_features": [
+    "log_days_since_installation",
+    "installation_age_band"
+  ],
+  "rows_by_split": {
+    "TRAIN": 14980,
+    "TEST": 2820,
+    "VALIDATION": 2316
+  },
+  "events_by_split": {
+    "TEST": 370,
+    "TRAIN": 3041,
+    "VALIDATION": 385
+  },
+  "support_totals": {
+    "0120201": 3182,
+    "0120202": 356,
+    "0120204": 1245,
+    "0120401": 1028,
+    "0120701": 165,
+    "0120702": 24,
+    "0120801": 210,
+    "0120901": 311,
+    "0121101": 1472,
+    "0121103": 1089,
+    "0121401": 415,
+    "0121408": 24,
+    "0121602": 677,
+    "0121603": 354,
+    "0121701": 271,
+    "0220402": 234,
+    "0220601": 201,
+    "0220602": 123,
+    "0220603": 13,
+    "0221601": 250,
+    "0320203": 199,
+    "0321301": 487,
+    "0321302": 490,
+    "0321501": 913,
+    "0420501": 415,
+    "0420502": 656,
+    "0420503": 135,
+    "0420504": 276,
+    "0420506": 11,
+    "0420510": 156,
+    "0521102": 491,
+    "0521104": 68,
+    "0521201": 1729,
+    "0521202": 372,
+    "0521203": 347,
+    "0521204": 76,
+    "0620302": 1064,
+    "0620307": 47,
+    "0620308": 6,
+    "0620505": 689,
+    "0620512": 4,
+    "0620517": 27,
+    "0720301": 1912,
+    "0721001": 165,
+    "0820303": 143,
+    "0820507": 53,
+    "0820604": 11,
+    "0820605": 37,
+    "0820607": 7,
+    "0821901": 39,
+    "0921604": 59,
+    "0921610": 22,
+    "1020206": 11,
+    "1020511": 2,
+    "1020513": 8,
+    "1020514": 5,
+    "1020515": 1,
+    "1020516": 1,
+    "1020606": 5,
+    "1020608": 1,
+    "1020609": 5,
+    "1020610": 5,
+    "1021402": 50,
+    "1021406": 2,
+    "1021407": 1,
+    "1021902": 6,
+    "1122001": 356,
+    "1420511": 40,
+    "1520512": 279,
+    "1521403": 126,
+    "1521405": 207,
+    "1620205": 4,
+    "1920611": 24,
+    "1921105": 12,
+    "1921205": 14,
+    "1921303": 12
+  },
+  "hyperparameters": {
+    "random_survival_forest": {
+      "n_estimators": 100,
+      "min_samples_split": 40,
+      "min_samples_leaf": 30,
+      "max_features": "sqrt",
+      "n_jobs": -1,
+      "random_state": 42
+    },
+    "cox_ph": {
+      "alpha": 0.1,
+      "ties": "efron"
+    }
+  },
+  "metrics": {
+    "random_survival_forest": {
+      "validation": {
+        "rows": 2316,
+        "events": 385,
+        "c_index": 0.8077856245396646,
+        "max_followup_days": 363.0,
+        "horizons_evaluable_days": [
+          30,
+          60,
+          90,
+          120
+        ],
+        "integrated_brier_score": 0.07711840691544727,
+        "brier_at_horizon": {
+          "30": 0.06519104167431938,
+          "60": 0.07666032959316951,
+          "90": 0.08062995347993353,
+          "120": 0.08293883367215815
+        },
+        "time_dependent_auc_at_horizon": {
+          "30": 0.7955609252549821,
+          "60": 0.8201393274655698,
+          "90": 0.8395334558891046,
+          "120": 0.8524086768661115
+        }
+      },
+      "test": {
+        "rows": 2820,
+        "events": 370,
+        "c_index": 0.8050590671561886,
+        "max_followup_days": 214.0,
+        "horizons_evaluable_days": [
+          30,
+          60,
+          90,
+          120
+        ],
+        "integrated_brier_score": 0.08012462289869494,
+        "brier_at_horizon": {
+          "30": 0.08099731045152911,
+          "60": 0.08180520748401433,
+          "90": 0.07950721551021402,
+          "120": 0.07712558095218384
+        },
+        "time_dependent_auc_at_horizon": {
+          "30": 0.8377303064090014,
+          "60": 0.8681094813271162,
+          "90": 0.882044072850178,
+          "120": 0.9054488447838055
+        }
+      }
+    },
+    "cox_ph": {
+      "validation": {
+        "rows": 2316,
+        "events": 385,
+        "c_index": 0.7706155766647892,
+        "max_followup_days": 363.0,
+        "horizons_evaluable_days": [
+          30,
+          60,
+          90,
+          120
+        ],
+        "integrated_brier_score": 0.09214491962070051,
+        "brier_at_horizon": {
+          "30": 0.07541235403734753,
+          "60": 0.09265558316047832,
+          "90": 0.09591518164704144,
+          "120": 0.10031563407181603
+        },
+        "time_dependent_auc_at_horizon": {
+          "30": 0.7559633081367234,
+          "60": 0.7800982807425969,
+          "90": 0.8012292020937156,
+          "120": 0.8099158430992591
+        }
+      },
+      "test": {
+        "rows": 2820,
+        "events": 370,
+        "c_index": 0.8149164714687201,
+        "max_followup_days": 214.0,
+        "horizons_evaluable_days": [
+          30,
+          60,
+          90,
+          120
+        ],
+        "integrated_brier_score": 0.08675647385680031,
+        "brier_at_horizon": {
+          "30": 0.08433326596256879,
+          "60": 0.08835043467595638,
+          "90": 0.08667908385111815,
+          "120": 0.08614654012408403
+        },
+        "time_dependent_auc_at_horizon": {
+          "30": 0.8563783708520565,
+          "60": 0.8787274658065531,
+          "90": 0.8928562413229166,
+          "120": 0.908748175243237
+        }
+      }
+    }
+  }
+}

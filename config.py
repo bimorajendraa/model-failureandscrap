@@ -1,8 +1,11 @@
 """Konfigurasi tunggal untuk pipeline production.
 
-Semua angka/ambang di sini berasal dari hasil research yang sudah terbukti di
-repository lama (db_om_preparation). Tidak ada nilai baru yang dikarang: lihat
-README.md bagian "Asal-usul setiap konstanta".
+Hampir semua angka/ambang di sini berasal dari hasil research yang sudah
+terbukti di repository lama (db_om_preparation) - lihat README.md bagian
+"Asal-usul setiap konstanta". Pengecualian: FAILURE_HIGH/MEDIUM_PROBABILITY_
+THRESHOLD adalah keputusan operasional yang dipilih belakangan berdasarkan
+sebaran probabilitas armada aktif sungguhan, bukan dari research - lihat
+komentar di masing-masing konstanta.
 """
 
 from __future__ import annotations
@@ -121,14 +124,31 @@ AGE_BAND_LABELS = [
 # hazard chaining langsung, tanpa interpolasi.
 PREDICTION_HORIZON_DAYS = [30, 60, 90, 120]
 
-# --- Toleransi bisnis model kerusakan ---------------------------------------
+# --- Kelompok risiko kerusakan (HIGH/MEDIUM/LOW) -----------------------------
 #
-# Berapa PART per bulan yang sanggup diprioritaskan (disiapkan penggantinya,
-# dijadwalkan pemeriksaan, atau ditaruh cadangannya di dekat lokasi). Model
-# mengurutkan seluruh PART aktif menurut risiko, lalu sebanyak kapasitas
-# inilah yang ditandai HIGH.
+# Ambang tetap pada probabilitas kerusakan 30-hari YANG SUDAH DIKALIBRASI -
+# angka yang sama persis dengan yang dibaca pengguna di layar (bukan skor
+# mentah). BUKAN dari research - keputusan operasional yang diambil setelah
+# memeriksa sebaran probabilitas armada aktif sungguhan (~16.900 PART):
+# PART paling berisiko sekalipun jarang melewati ~27% pada horizon 30 hari,
+# jadi ambang 25%/15% ini dipilih sadar akan konsekuensinya - jumlah PART
+# yang ter-flag HIGH/MEDIUM akan JAUH di bawah kapasitas kerja tim
+# (~200/bulan) dan bisa naik-turun signifikan dari bulan ke bulan mengikuti
+# kondisi armada, tidak lagi tetap sejumlah kapasitas seperti sistem lama.
 #
-# Diukur pada data uji 2026 (sekitar 5.500 pemeriksaan PART per bulan):
+# Ubah SATU angka ini kalau ambangnya perlu digeser, lalu jalankan
+# `python train.py`.
+FAILURE_HIGH_PROBABILITY_THRESHOLD = 0.25
+FAILURE_MEDIUM_PROBABILITY_THRESHOLD = 0.15
+
+# --- Kapasitas kerja tim (dipakai mengevaluasi kualitas model saat promosi) --
+#
+# BUKAN dasar kelompok risiko di atas (itu sudah ambang tetap) - ini dipakai
+# training_utils.py untuk menghitung Recall/Precision@kapasitas, metrik yang
+# membandingkan model kandidat vs model production saat retrain (lihat
+# decide_promotion() di train.py). Berapa PART per bulan yang sanggup
+# diprioritaskan tim, diukur pada data uji 2026 (sekitar 5.500 pemeriksaan
+# PART per bulan):
 #
 #   kapasitas/bln  ambang   presisi   tertangkap    berapa kali lebih tepat
 #              50  0,1365    29,4%    145 dari 902           12,5x
@@ -139,14 +159,8 @@ PREDICTION_HORIZON_DAYS = [30, 60, 90, 120]
 #
 # Default 200/bulan dipilih karena SETARA dengan aturan lama yang sudah
 # tervalidasi di research (>=3x base rate validasi: presisi 16,6%, recall
-# 36,6%). Jadi perilakunya tidak berubah - yang berubah hanya cara
-# menyetelnya, dari kelipatan statistik menjadi angka kapasitas yang bisa
-# dibicarakan dengan tim operasional.
-#
-# Ubah SATU angka ini kalau kapasitas berubah, lalu jalankan `python train.py`.
+# 36,6%).
 FAILURE_CAPACITY_PER_MONTH = 200
-# Kelompok MEDIUM = lapis berikutnya kalau kapasitas bertambah.
-FAILURE_MEDIUM_CAPACITY_MULTIPLIER = 2.0
 
 # --- Kanonikalisasi teks (client/lokasi) ------------------------------------
 # Mapping yang sudah disetujui reviewer pada fase research. Disimpan sebagai

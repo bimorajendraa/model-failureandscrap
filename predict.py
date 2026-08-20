@@ -109,11 +109,11 @@ def _load_model() -> tuple[CatBoostClassifier, object, dict]:
 
 
 def _risk_level(probability: float, cutoffs: dict[str, float]) -> str:
-    """Kelompokkan risiko memakai ambang yang ditetapkan saat training.
+    """Kelompokkan risiko memakai ambang tetap yang ditetapkan saat training.
 
-    Ambangnya diturunkan dari kapasitas kerja yang ditetapkan bisnis, bukan
-    angka bulat yang dikarang: sebanyak PART yang sanggup ditindaklanjuti per
-    bulan itulah yang masuk kelompok HIGH. Lihat config.py.
+    `probability` di sini adalah peluang kerusakan 30-hari yang sudah
+    dikalibrasi - angka yang sama persis dengan yang dibaca pengguna di
+    layar. Lihat FAILURE_HIGH/MEDIUM_PROBABILITY_THRESHOLD di config.py.
     """
     if probability >= cutoffs["high"]:
         return "HIGH"
@@ -157,16 +157,10 @@ def predict(item_id: str) -> dict:
     # Hazard tiap 30 hari, lalu dirantai jadi risiko kumulatif.
     steps = max(config.PREDICTION_HORIZON_DAYS) // config.OBSERVATION_STEP_DAYS
     survival = 1.0
-    tier_score = 0.0
     cumulative_risk: dict[int, float] = {}
     for step in range(steps):
         features = feature_builder.project_features(snapshot, support, step)
         raw = float(model.predict_proba(features)[:, 1][0])
-        if step == 0:
-            # Kelompok risiko memakai skor mentah langkah pertama: urutannya
-            # sama dengan probabilitas terkalibrasi, tetapi nilainya jauh
-            # lebih halus sehingga batas kapasitas bisa tepat. Lihat train.py.
-            tier_score = raw
         hazard = float(calibrator.predict([raw])[0])
         survival *= 1.0 - hazard
         cumulative_risk[(step + 1) * config.OBSERVATION_STEP_DAYS] = 1.0 - survival
@@ -179,7 +173,9 @@ def predict(item_id: str) -> dict:
     return {
         "item_id": snapshot["item_identifier_clean"].iloc[0],
         **probabilities,
-        "risk_level": _risk_level(tier_score, metadata["risk_cutoffs"]),
+        "risk_level": _risk_level(
+            probabilities["failure_probability_30d"], metadata["risk_cutoffs"]
+        ),
         "model_version": metadata["model_version"],
         "as_of": str(snapshot["observation_on"].iloc[0]),
     }

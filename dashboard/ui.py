@@ -199,9 +199,6 @@ def priority_table(items: list[dict], columns: list[str], key: str = "priority_t
 
     selected_id = str(frame.iloc[rows[0]]["item_id"])
     if st.button(f"🔍 Lihat detail PART {selected_id}", key=f"{key}_open_detail"):
-        # session_state dibagi antar halaman dalam satu sesi Streamlit, jadi
-        # halaman Detail PART bisa membaca ID ini sebagai nilai awal kotak
-        # pencarian tanpa perlu URL/query param.
         st.session_state["detail_item_id"] = selected_id
         st.switch_page("pages/2_Detail_PART.py")
 

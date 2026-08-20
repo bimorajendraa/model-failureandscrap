@@ -22,8 +22,7 @@ st.caption(
 )
 
 st.warning(
-    "**Ini bukan daftar PART yang akan dibuang.** Risiko rusak total bersifat "
-    "bersyarat - peluang PART tidak bisa diperbaiki JIKA rusak. Daftar ini "
+    "Daftar ini "
     "gunanya untuk menyiapkan stok pengganti lebih awal, bukan untuk "
     "memutuskan penggantian."
 )

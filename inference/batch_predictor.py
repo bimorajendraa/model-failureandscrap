@@ -179,14 +179,16 @@ def _score_failure(
 
     steps = max(_HORIZONS) // config.OBSERVATION_STEP_DAYS
     survival = np.ones(len(snapshot), dtype=float)
+    # Skor mentah langkah pertama - dipakai mengurutkan daftar (kolom "rank"),
+    # bukan menentukan kelompok risiko (itu urusan failure_probability_30d di
+    # bawah). Resolusinya jauh lebih halus daripada probabilitas terkalibrasi,
+    # jadi urutan PART yang skornya berdekatan tetap bisa dibedakan.
     tier_score = np.zeros(len(snapshot), dtype=float)
     cumulative: dict[int, np.ndarray] = {}
     for step in range(steps):
         features = feature_builder.project_features(snapshot, support, step)
         raw = model.predict_proba(features)[:, 1]
         if step == 0:
-            # Kelompok risiko memakai skor mentah langkah pertama, sama
-            # seperti predict().
             tier_score = raw
         hazard = calibrator.predict(raw)
         survival = survival * (1.0 - hazard)
@@ -202,9 +204,11 @@ def _score_failure(
     })
     for days in _HORIZONS:
         result[f"failure_probability_{days}d"] = np.round(cumulative[days], 4)
-    # Fungsi milik model sendiri, bukan salinan aturannya.
+    # Fungsi milik model sendiri, bukan salinan aturannya. Sama seperti
+    # predict(): kelompok risiko dari probabilitas 30-hari terkalibrasi.
     result["failure_risk_level"] = [
-        failure_model.risk_level(score, cutoffs) for score in tier_score
+        failure_model.risk_level(score, cutoffs)
+        for score in result["failure_probability_30d"]
     ]
 
     features_by_item = snapshot[explanation.SOURCE_COLUMNS].copy()

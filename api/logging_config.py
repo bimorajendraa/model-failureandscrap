@@ -13,10 +13,6 @@ import logging
 import os
 import sys
 
-# Format terstruktur satu baris: waktu, level, nama logger, pesan. Cukup
-# untuk dibaca manusia langsung DAN cukup teratur untuk di-parse alat log
-# (mis. dipecah per kolom oleh spasi/kurung siku) tanpa perlu dependensi JSON
-# logging tambahan - sesuai skala aplikasi ini sekarang.
 _FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -38,11 +34,5 @@ def setup() -> None:
     root = logging.getLogger()
     root.setLevel(level)
     root.addHandler(handler)
-
-    # uvicorn punya logger sendiri (uvicorn.error, uvicorn.access) yang sudah
-    # dikonfigurasi uvicorn sendiri saat dijalankan lewat CLI `uvicorn ...` -
-    # tidak disentuh di sini supaya tidak mendobel baris log saat itu terjadi.
-    # Saat dijalankan cara lain (mis. lewat TestClient di test), logger uvicorn
-    # ikut memakai root handler di atas - tetap konsisten.
 
     _configured = True
