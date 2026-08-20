@@ -26,19 +26,33 @@ SURVIVAL_DIR = Path(__file__).resolve().parent
 if str(SURVIVAL_DIR) not in sys.path:
     sys.path.insert(0, str(SURVIVAL_DIR))
 
+import os
+
+import joblib
 import numpy as np
 import pandas as pd
 
 import data_reader
 import feature_builder
 
-from src import features, lifecycle_builder, utils
+from src import features, install_context, lifecycle_builder, utils
 
 REPORTS_DIR = SURVIVAL_DIR / "reports"
+_DEV_CACHE_PATH = SURVIVAL_DIR / "artifacts" / "_experiment_cache" / "build_dataset_build.joblib"
 
 
 def build() -> dict:
-    """Baca database dan susun dataset survival siap dipakai train.py/evaluate.py."""
+    """Baca database dan susun dataset survival siap dipakai train.py/evaluate.py.
+
+    Set env var SURVIVAL_BUILD_CACHE=1 untuk memakai cache lokal (dev/debug
+    saja - lingkungan ini terbukti bisa sangat lambat membaca DB berkali-kali
+    dalam satu sesi kerja). TIDAK aktif secara default - pemanggilan normal
+    selalu baca data fresh dari database, seperti seharusnya production
+    script."""
+    if os.environ.get("SURVIVAL_BUILD_CACHE") and _DEV_CACHE_PATH.exists():
+        print("      [dev cache] memuat build_dataset.build() dari cache lokal...")
+        return joblib.load(_DEV_CACHE_PATH)
+
     events = data_reader.get_events()
     cycles = data_reader.get_cycles()
     episodes = data_reader.get_failure_episodes()
@@ -47,20 +61,23 @@ def build() -> dict:
     cohort = lifecycle_builder.cohort_cycles(cycles)
     outcome = lifecycle_builder.assign_lifecycle_outcome(cohort, data_end)
 
-    # Dukungan historis tipe PART dihitung dari SELURUH cohort (bukan hanya
-    # baris eligible) - sama seperti model classification
-    # (feature_builder.training_observations): kalau dihitung hanya dari
-    # baris eligible, PART model yang banyak siklus REINSTALL/RECON-ambigu
-    # akan tampak lebih jarang daripada sebenarnya.
+    # Dukungan historis (part_model DAN item_type_at_install) dihitung dari
+    # SELURUH cohort (bukan hanya baris eligible) - sama seperti model
+    # classification (feature_builder.training_observations): kalau dihitung
+    # hanya dari baris eligible, tipe yang banyak siklus REINSTALL/RECON-
+    # ambigu akan tampak lebih jarang daripada sebenarnya.
     baseline_all = features.build_baseline_observations(outcome)
+    baseline_all = install_context.attach_install_context(baseline_all, events)
     support_all = feature_builder.cumulative_support(baseline_all)
     support_totals = feature_builder.support_totals(baseline_all)
+    item_type_support_totals = features.item_type_support_totals(baseline_all)
     outcome = outcome.assign(_support=support_all.to_numpy())
 
     lifecycles = lifecycle_builder.eligible_lifecycles(outcome)
 
     observations = features.build_baseline_observations(lifecycles)
     observations = features.attach_survival_features(observations, events, cycles, episodes)
+    observations = features.attach_final_context(observations, events, cycles)
     feature_frame = features.compute_features(observations, observations["_support"])
 
     dataset = observations[[
@@ -69,16 +86,26 @@ def build() -> dict:
         "cycle_end_reason", "split", "cutoff_on", "duration_days", "event_observed",
     ]].reset_index(drop=True)
 
-    return {
+    result = {
         "dataset": dataset,
         "features": feature_frame,
         "support_totals": support_totals,
+        "item_type_support_totals": item_type_support_totals,
         "data_end": data_end,
         "events": events,
         "cycles": cycles,
         "episodes": episodes,
         "cohort_outcome": outcome,  # dipakai validate() untuk melaporkan yang di-exclude
+        # Observasi setelah SEMUA context ditempel (riwayat mentah + armada +
+        # _support + item_type_at_install + previous-cycle confirmed-failure) -
+        # dipakai experiments.py untuk eksperimen fitur lanjutan tanpa membaca
+        # ulang database, dan tersedia untuk debugging/audit manual.
+        "observations": observations,
     }
+    if os.environ.get("SURVIVAL_BUILD_CACHE"):
+        _DEV_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(result, _DEV_CACHE_PATH)
+    return result
 
 
 # ---------------------------------------------------------------------------

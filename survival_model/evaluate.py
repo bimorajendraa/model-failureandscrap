@@ -101,61 +101,96 @@ def native_layer(models: dict, encoder, y_train, dataset, feature_frame) -> dict
 # ---------------------------------------------------------------------------
 
 
-def classification_layer(models: dict, encoder, built: dict) -> dict:
-    classification_train = _load_root_module("classification_train", "train.py")
+def load_classification_test_rows() -> tuple:
+    """Baris TEST classification (dipinjam READ-ONLY lewat `train.build_dataset()`
+    di root, tidak pernah dipakai fitting) + panjang window uji dalam hari.
 
-    print("      Membangun ulang dataset classification (dipinjam read-only, tidak di-fit)...")
+    Mahal (membangun ulang grid 30-harian 1,4 juta baris classification) -
+    dipanggil SEKALI dan dipakai ulang oleh SEMUA model yang mau dinilai
+    (evaluate.py maupun experiments.py yang menguji puluhan kandidat), bukan
+    per model.
+    """
+    classification_train = _load_root_module("classification_train", "train.py")
     c_dataset, _c_features, _support, _data_end, _events, _cycles, _episodes = (
         classification_train.build_dataset()
     )
     test_rows = c_dataset.loc[c_dataset["split"] == classification_train.TEST].copy()
+    observed = pd.to_datetime(test_rows["observation_on"])
+    window_days = float((observed.max() - observed.min()).days) if len(test_rows) else 0.0
+    return test_rows, window_days
+
+
+def score_operational(
+    model, feature_frame_by_cycle_id: pd.DataFrame, encoder, test_rows: pd.DataFrame, window_days: float,
+    *, numeric_columns: list[str] | None = None,
+) -> dict | None:
+    """Skor SATU model survival pada populasi TEST classification yang
+    dipinjam `load_classification_test_rows()` - `training_utils.full_metrics()`
+    yang SAMA PERSIS dipakai `train.py` classification. Dipisah dari
+    `classification_layer()` supaya `experiments.py` bisa memanggilnya
+    berulang untuk banyak model kandidat tanpa membangun ulang `test_rows`.
+
+    `feature_frame_by_cycle_id` = fitur baseline instalasi, index-nya
+    `installation_cycle_id` (satu baris per lifecycle unik).
+    """
+    matched_mask = test_rows["installation_cycle_id"].isin(feature_frame_by_cycle_id.index)
+    n_total, n_matched = len(test_rows), int(matched_mask.sum())
+    if n_matched == 0:
+        return None
+    rows = test_rows.loc[matched_mask]
+    ages = pd.to_numeric(rows["days_since_installation"], errors="coerce").to_numpy()
+    target = rows["target_failure"].astype(bool).to_numpy()
+
+    # Banyak baris TEST classification (grid 30-harian) berasal dari lifecycle
+    # yang SAMA (satu PART diobservasi berkali-kali sepanjang siklusnya) -
+    # kurva S(t) dihitung SEKALI per lifecycle unik (bukan per baris snapshot).
+    # Tanpa dedup ini, predict_survival_function() pada puluhan ribu baris
+    # sekaligus bisa mengalokasikan >1 GiB (uji coba pertama gagal karena ini).
+    unique_ids = rows["installation_cycle_id"].drop_duplicates().to_numpy()
+    unique_features = feature_frame_by_cycle_id.loc[unique_ids]
+    x_unique = features.encode(unique_features, encoder, numeric_columns)
+
+    times_grid, curves = utils.survival_curve_arrays(model, x_unique)
+    curve_by_cycle = dict(zip(unique_ids, curves))
+    risk_30d = np.array(
+        [
+            utils.conditional_risk(times_grid, curve_by_cycle[cid], age, 30.0)
+            for cid, age in zip(rows["installation_cycle_id"].to_numpy(), ages)
+        ]
+    )
+    metrics = training_utils.full_metrics(
+        risk_30d, risk_30d, target, window_days, config.FAILURE_CAPACITY_PER_MONTH
+    )
+    metrics["rows_matched"] = n_matched
+    metrics["rows_total_classification_test"] = n_total
+    return metrics
+
+
+def classification_layer(models: dict, encoder, built: dict) -> dict:
+    print("      Membangun ulang dataset classification (dipinjam read-only, tidak di-fit)...")
+    test_rows, window_days = load_classification_test_rows()
 
     survival_dataset = built["dataset"]
     survival_features = built["features"].copy()
     survival_features.index = survival_dataset["installation_cycle_id"].to_numpy()
 
-    matched_mask = test_rows["installation_cycle_id"].isin(survival_features.index)
-    n_total, n_matched = len(test_rows), int(matched_mask.sum())
+    n_matched = int(test_rows["installation_cycle_id"].isin(survival_features.index).sum())
     print(
-        f"      {n_matched:,}/{n_total:,} baris TEST classification punya lifecycle survival yang "
+        f"      {n_matched:,}/{len(test_rows):,} baris TEST classification punya lifecycle survival yang "
         "cocok (sisanya di-exclude survival tapi tidak di classification, mis. karena aturan "
         "censoring per-split - lihat reports/data_validation.md)"
     )
-    test_rows = test_rows.loc[matched_mask].reset_index(drop=True)
-    ages = pd.to_numeric(test_rows["days_since_installation"], errors="coerce").to_numpy()
-    target = test_rows["target_failure"].astype(bool).to_numpy()
-    observed = pd.to_datetime(test_rows["observation_on"])
-    window_days = float((observed.max() - observed.min()).days) if len(test_rows) else 0.0
 
-    # Banyak baris TEST classification (grid 30-harian) berasal dari lifecycle
-    # yang SAMA (satu PART diobservasi berkali-kali sepanjang siklusnya) -
-    # kurva S(t) dihitung SEKALI per lifecycle unik (bukan per baris snapshot),
-    # baru risiko bersyarat dihitung per baris pakai umurnya masing-masing.
-    # Tanpa dedup ini, predict_survival_function() pada puluhan ribu baris
-    # sekaligus bisa mengalokasikan >1 GiB (uji coba pertama gagal karena ini).
-    unique_ids = test_rows["installation_cycle_id"].drop_duplicates().to_numpy()
-    unique_features = survival_features.loc[unique_ids]
-    print(f"      {len(unique_ids):,} lifecycle unik di balik {len(test_rows):,} baris snapshot")
-    x_unique = features.encode(unique_features, encoder)
-
-    results = {}
-    for name, model in models.items():
-        times_grid, curves = utils.survival_curve_arrays(model, x_unique)
-        curve_by_cycle = dict(zip(unique_ids, curves))
-        risk_30d = np.array(
-            [
-                utils.conditional_risk(times_grid, curve_by_cycle[cid], age, 30.0)
-                for cid, age in zip(test_rows["installation_cycle_id"].to_numpy(), ages)
-            ]
-        )
-        results[name] = training_utils.full_metrics(
-            risk_30d, risk_30d, target, window_days, config.FAILURE_CAPACITY_PER_MONTH
-        )
+    results = {
+        name: score_operational(model, survival_features, encoder, test_rows, window_days)
+        for name, model in models.items()
+    }
+    any_result = next((m for m in results.values() if m is not None), None)
 
     production_version, production_metrics = _load_classification_production_metrics()
     return {
-        "rows_matched": n_matched,
-        "rows_total_classification_test": n_total,
+        "rows_matched": any_result["rows_matched"] if any_result else 0,
+        "rows_total_classification_test": len(test_rows),
         "window_days": window_days,
         "survival_models": results,
         "classification_production_version": production_version,
@@ -188,9 +223,11 @@ def _format_report(native: dict, comparison: dict, metadata: dict) -> str:
     for split_name, per_model in native.items():
         lines.append(f"\n### {split_name}")
         for model_name, m in per_model.items():
+            uno = f"{m['uno_c_index']:.4f}" if m.get("uno_c_index") is not None else "N/A"
             lines.append(
                 f"- **{model_name}**: rows={m['rows']:,} events={m['events']:,} "
-                f"C-index={m['c_index']:.4f} IBS={m['integrated_brier_score']}"
+                f"C-index(Harrell)={m['c_index']:.4f} C-index(Uno/IPCW)={uno} "
+                f"IBS={m['integrated_brier_score']}"
             )
             if m["brier_at_horizon"]:
                 brier = ", ".join(f"{h}d={v:.4f}" for h, v in m["brier_at_horizon"].items())
@@ -213,6 +250,9 @@ def _format_report(native: dict, comparison: dict, metadata: dict) -> str:
     header = f"{'model':28s} {'PR-AUC':>8s} {'ROC-AUC':>8s} {'Recall@cap':>11s} {'Precision@cap':>14s} {'Brier':>8s}"
     lines.append(f"\n```\n{header}")
     for name, m in comparison["survival_models"].items():
+        if m is None:
+            lines.append(f"{name:28s} (tidak ada baris TEST classification yang cocok)")
+            continue
         lines.append(
             f"{name:28s} {m['pr_auc']:>8.4f} {m['roc_auc']:>8.4f} {m['recall_at_capacity']:>11.4f} "
             f"{m['precision_at_capacity']:>14.4f} {m['brier_calibrated']:>8.4f}"

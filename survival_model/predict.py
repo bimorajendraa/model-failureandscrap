@@ -57,11 +57,12 @@ def _load_primary_model():
         model.n_jobs = 1
     encoder = joblib.load(ARTIFACTS_DIR / "encoder.joblib")
     support_totals = {k: int(v) for k, v in metadata["support_totals"].items()}
-    return model, primary_name, encoder, support_totals
+    item_type_support_totals = {k: int(v) for k, v in metadata["item_type_support_totals"].items()}
+    return model, primary_name, encoder, support_totals, item_type_support_totals
 
 
 def predict(item_id: str) -> dict:
-    model, model_name, encoder, support_totals = _load_primary_model()
+    model, model_name, encoder, support_totals, item_type_support_totals = _load_primary_model()
 
     dataset_max_event_on = data_reader.get_dataset_max_event_on()
     cycles_for_item = data_reader.get_cycles(item_id=item_id, dataset_max_event_on=dataset_max_event_on)
@@ -84,11 +85,14 @@ def predict(item_id: str) -> dict:
 
     observations = features.build_baseline_observations(active_cycle)
     observations = features.attach_survival_features(observations, events, all_cycles, episodes)
-    # Dukungan historis tipe PART pakai angka yang DIBEKUKAN saat train.py -
-    # bukan dihitung ulang - konsisten dengan alasan yang sama di
-    # feature_builder.part_model_support() (model classification).
+    observations = features.attach_final_context(observations, events, all_cycles)
+    # Dukungan historis (part_model DAN item_type_at_install) pakai angka
+    # yang DIBEKUKAN saat train.py - bukan dihitung ulang dari 1 baris ini
+    # sendiri (yang akan selalu memberi dukungan=1) - konsisten dengan alasan
+    # yang sama di feature_builder.part_model_support() (model classification).
     support = observations["item_model_code_clean"].map(support_totals).fillna(0).astype("int64")
-    feature_frame = features.compute_features(observations, support)
+    item_type_support = observations["item_type_at_install"].map(item_type_support_totals).fillna(0).astype("int64")
+    feature_frame = features.compute_features(observations, support, item_type_support)
     x = features.encode(feature_frame, encoder)
 
     times_grid, curves = utils.survival_curve_arrays(model, x)

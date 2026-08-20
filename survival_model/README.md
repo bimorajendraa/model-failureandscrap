@@ -179,37 +179,72 @@ di root: tahun terakhir data = TEST, setahun sebelumnya = VALIDATION,
 Pada data saat eksperimen ini dibuat (`data_end` = 2026-08-03):
 `validation_start` = 2025-01-01, `test_start` = 2026-01-01.
 
-## Fitur (19, dari 21 fitur model classification)
+## Fitur (hasil audit metodologis, bukan tebakan awal)
 
-Reuse penuh `feature_builder.build_features()` (fungsi asli, tidak diubah),
-minus 2 kolom yang SELALU konstan pada `observation_on=installed_on`:
-`log_days_since_installation` dan `installation_age_band` - umur pemasangan
-di sini adalah **sumbu waktu model** (`duration_days`), bukan fitur input.
+Iterasi pertama eksperimen ini reuse 19 fitur classification apa adanya
+(minus 2 kolom yang SELALU konstan pada `observation_on=installed_on`:
+`log_days_since_installation`/`installation_age_band` - umur pemasangan di
+sini adalah **sumbu waktu model**, bukan fitur input). Sesi audit berikutnya
+menguji secara eksplisit: (1) apakah konteks instalasi (part type/lokasi/
+client, di luar riwayat kejadian) membawa signal tambahan, (2) apakah
+threshold kategori classification (`config.MIN_PART_MODEL_SUPPORT=300`,
+dikalibrasi untuk skala 251rb baris) juga optimal untuk skala ~15rb lifecycle
+survival, dan (3) apakah `previous_cycle_lifetime_mean` benar-benar mengukur
+"lifetime sampai gagal" seperti namanya. Metodologi lengkap dan tabel angka
+di `reports/category_threshold.md`, `reports/feature_ablation.md`,
+`reports/previous_cycle_audit.md`, `reports/model_comparison.md`
+(dihasilkan `experiments.py`) - ringkasan hasil ada di bagian "Hasil" di
+bawah.
+
+Fitur FINAL yang dipakai `train.py`/`evaluate.py`/`predict.py`:
 
 | Kelompok | Fitur |
 |---|---|
-| Kategorikal | `part_model_category`, `client_category` |
+| Kategorikal | `part_model_category` (threshold survival=200), `client_category`, `item_type_at_install_grouped` (threshold=300, **baru**) |
 | Riwayat | `log_total_prior_events`, `log_prior_failure_count`, `has_prior_failure`, `log_prior_corrective_count`, `has_prior_corrective`, `log_days_since_last_corrective`, `log_prior_distinct_places` |
 | Jendela waktu | `log_prior_corrective_30d`, `log_prior_failure_365d`, `log_prior_events_180d` |
-| Lifecycle antar-siklus | `log_previous_cycle_lifetime_mean`, `has_previous_cycle` |
+| Lifecycle antar-siklus | `log_previous_cycle_confirmed_failure_lifetime_mean`, `has_previous_cycle_confirmed_failure_lifetime_mean` (**diganti** dari `previous_cycle_lifetime_mean` - lihat "Audit previous-cycle" di Hasil) |
 | Musiman (bulan instalasi) | `month_sin`, `month_cos` |
 | Kondisi armada | `log_model_failures_90d`, `model_failure_rate_90d`, `log_model_fleet_size` |
+
+`item_type_at_install` (tipe PART persis saat instalasi, dari event
+`INSTALLED` yang sudah dibaca `build_dataset.build()` - tidak ada query
+baru, lihat `src/install_context.py`) TERBUKTI menambah signal VALIDATION di
+atas fitur warisan. `place_at_install` (lokasi saat instalasi) DIUJI tapi
+TIDAK diikutkan di kombinasi final - menaikkan skor sendirian tapi
+menurunkannya saat digabung dengan `item_type_at_install` (lihat ablation).
+`device_type`/`device_model` diinvestigasi dan TIDAK dipakai - tidak
+tersedia lewat relasi yang sudah dikanonikalisasi tanpa membuat mapping baru
+(item_category cohort ini hanya 'PART'/'TERMINAL', tidak ada relasi
+"device" bersih untuk PART) - didokumentasikan sebagai keterbatasan data,
+bukan dipaksakan.
 
 Kategorikal di-one-hot-encode (RSF/CoxPH di `scikit-survival` tidak punya
 native categorical handling seperti CatBoost); encoder di-fit HANYA di TRAIN
 dan disimpan di `artifacts/encoder.joblib`.
+
+`LEGACY_CATEGORICAL_FEATURES`/`LEGACY_NUMERIC_FEATURES` di `src/features.py`
+menyimpan 19 fitur warisan classification apa adanya, dipertahankan sebagai
+titik referensi "A_current" di `experiments.py` - TIDAK dipakai model
+production.
 
 ## Model
 
 - **Random Survival Forest** (`sksurv.ensemble.RandomSurvivalForest`) -
   model utama/`primary_model`.
 - **Cox Proportional Hazards** (`sksurv.linear_model.CoxPHSurvivalAnalysis`,
-  ridge kecil `alpha=0.1`) - baseline pembanding sederhana.
+  ridge kecil `alpha=0.1`) - baseline pembanding, dipertahankan permanen di
+  SETIAP tahap eksperimen (bukan dibuang setelah RSF menang) supaya terlihat
+  jelas kalau suatu saat sebuah kombinasi fitur membuat model linear
+  menyamai/mengalahkan RSF (sinyal bottleneck ada di fitur, bukan model).
 
 Keduanya dilatih dan dilaporkan berdampingan (pola yang sama seperti
-perbandingan LogReg+RF pada model scrap di root), tanpa pencarian
-hyperparameter besar-besaran - tujuannya membuktikan formulasi survival,
-bukan memeras skor.
+perbandingan LogReg+RF pada model scrap di root). Hyperparameter RSF diuji
+lewat pencarian KECIL coordinate-wise (`n_estimators`, `min_samples_leaf`,
+`max_features`, `max_depth` - satu sumbu diubah per langkah dari titik
+current, bukan grid penuh) SETELAH seluruh kerja fitur selesai, dipilih dari
+VALIDATION - lihat `reports/model_comparison.md`. Tidak ada trial yang
+mengalahkan default/current.
 
 ## Evaluasi (dua lapis, TIDAK dicampur)
 
@@ -259,12 +294,27 @@ survival_model/
 ├── train.py                 # latih RSF + Cox PH, simpan artifacts/
 ├── evaluate.py               # Lapis 1 + Lapis 2 evaluasi, tulis reports/
 ├── predict.py                 # CLI: python predict.py <item_id>
+├── experiments.py             # audit metodologis: threshold sweep, ablation
+│                              # A/B/C, audit previous-cycle, tuning RSF kecil -
+│                              # dijalankan SEKALI untuk memilih konfigurasi final,
+│                              # bukan bagian alur production rutin
 ├── src/
 │   ├── lifecycle_builder.py   # cohort filter + aturan censoring per-split
-│   ├── features.py             # wrapper reuse feature_builder + one-hot encoder
-│   └── utils.py                 # split bounds, evaluasi kurva S(t)
+│   ├── features.py             # fitur final + wrapper reuse feature_builder
+│   ├── categorical_support.py   # cumulative support point-in-time generik
+│   │                            # (versi bukan-hardcoded dari feature_builder.
+│   │                            # cumulative_support, dipakai kolom apa pun)
+│   ├── install_context.py        # item_type_at_install/place_at_install dari
+│   │                              # events INSTALLED yang sudah dibaca
+│   ├── previous_cycle.py           # audit + hitung fitur previous-cycle
+│   │                              # confirmed-failure-only (point-in-time)
+│   ├── model_fit.py                # fit_models/evaluate_models - dipakai
+│   │                              # train.py DAN experiments.py
+│   └── utils.py                     # split bounds, evaluasi kurva S(t)
 ├── artifacts/                   # models.joblib, encoder.joblib, metadata.json
-└── reports/                     # data_validation.md, evaluation_report.md
+└── reports/                     # data_validation.md, evaluation_report.md,
+                                  # category_threshold.md, feature_ablation.md,
+                                  # previous_cycle_audit.md, model_comparison.md
 ```
 
 ## Cara pakai
@@ -310,9 +360,27 @@ hanya exit proses yang macet. `evaluate.py` dan `predict.py` memaksa
 
 ## Hasil
 
-Dari training pada data s/d `data_end` = 2026-08-03 11:07:22.
+Dari training pada data s/d `data_end` = 2026-08-03. Bagian ini punya dua
+lapis: **audit metodologis** (`experiments.py`, keputusan dari VALIDATION)
+yang menjelaskan KENAPA konfigurasi final terlihat seperti ini, lalu
+**hasil final** dari `train.py`/`evaluate.py` dengan konfigurasi itu.
 
-### 1-2. Lifecycle & event/censored
+### 1. Audit fase awal: censoring & baseline instalasi
+
+Sebelum fitur/threshold apa pun diubah, `src/lifecycle_builder.py` diaudit
+ulang lewat kasus manual persis seperti yang diminta: PART terpasang
+Desember 2024, failure Juli 2026, cutoff TRAIN = `validation_start`
+(2025-01-01). Hasilnya sesuai spesifikasi - baris itu di TRAIN mendapat
+`event_observed=0, duration_days=cutoff-installed_on` (durasi ke
+2025-01-01, BUKAN ke tanggal failure 2026-07), karena Juli 2026 berada
+SETELAH cutoff TRAIN dan karena itu tidak boleh terlihat. Failure itu baru
+"terbuka" saat baris yang sama dievaluasi di VALIDATION/TEST dengan cutoff
+mereka sendiri (2026-01-01 / hari ini) yang sudah melewati tanggal
+failure-nya. Tidak ada perubahan di `lifecycle_builder.py` - mekanisme
+administrative censoring per-split dari sesi sebelumnya **terverifikasi
+benar**, dipertahankan apa adanya.
+
+### 2. Lifecycle & event/censored (tidak berubah oleh audit fitur)
 
 23.927 lifecycle cohort (`is_initial_model_cohort`, durasi positif) ->
 **20.116 lifecycle eligible** (84,1%) setelah aturan censoring per-split -
@@ -326,117 +394,260 @@ lihat `reports/data_validation.md` untuk rincian lengkap.
 
 Base rate menurun dari TRAIN ke TEST - **bukan berarti fleet makin aman**,
 tapi karena TEST berisi lifecycle yang baru dimulai (installed_on >=
-2026-01-01) dengan follow-up jauh lebih pendek (maks 214 hari) dibanding
-TRAIN (bisa sampai ribuan hari) - lebih sedikit waktu untuk failure
-terjadi/tercatat. Perbandingan base rate antar split TIDAK apple-to-apple
-karena alasan ini, dicatat sebagai keterbatasan.
+2026-01-01) dengan follow-up jauh lebih pendek dibanding TRAIN (bisa sampai
+ribuan hari) - lebih sedikit waktu untuk failure terjadi/tercatat.
+Perbandingan base rate antar split TIDAK apple-to-apple karena alasan ini.
 
-### 3. Fitur
+### 3. Konteks instalasi yang dicoba (installation context)
 
-19 fitur (2 kategorikal one-hot + 14 numerik riwayat/lifecycle/musiman + 3
-kondisi armada) - daftar lengkap di bagian "Fitur" di atas.
+`item_type_at_install` dan `place_at_install` diambil dari event
+`INSTALLED` yang sudah dibaca `build_dataset.build()` (tanpa query baru).
+`device_type`/`device_model` **tidak dipakai** - tidak tersedia lewat relasi
+yang sudah dikanonikalisasi di cohort ini tanpa membuat mapping baru
+(item_category cohort hanya 'PART'/'TERMINAL'), didokumentasikan sebagai
+keterbatasan data, bukan dipaksakan lewat join baru.
 
-### 4. Model
+### 4. Threshold kategori khusus survival (`reports/category_threshold.md`)
 
-Random Survival Forest (`n_estimators=100, min_samples_split=40,
-min_samples_leaf=30`) sebagai model utama, Cox PH (`alpha=0.1`) sebagai
-baseline pembanding.
+`config.MIN_PART_MODEL_SUPPORT=300` classification dikalibrasi untuk skala
+251.568 baris TRAIN classification - diuji ULANG khusus untuk skala ~15rb
+lifecycle TRAIN survival dengan sweep `[20,50,100,200,300]`, dipilih dari VAL
+C-index (RSF ringan 50 pohon), TEST tidak dipakai memilih:
 
-### 5. C-index (Lapis 1, native survival, dari t=0=installed_on)
+| Kolom | Kategori asli | Threshold terpilih | VAL C-index terbaik |
+|---|---|---|---|
+| `item_model_code_clean` | 46 | **200** (bukan 300 classification) | 0,8116 |
+| `item_type_at_install` | 18 | **300** | 0,8147 |
+| `place_at_install` | 137 | **50** | 0,8099 |
 
-| Model | VALIDATION | TEST |
+Tabel lengkap 15 baris (semua threshold x semua kolom, termasuk hitungan
+unseen VAL/TEST) ada di reportnya. Threshold classification (300) BUKAN
+optimal untuk `item_model_code_clean` di skala survival - 200 menang tipis
+tapi konsisten.
+
+### 5. Ablation A (current) / B (context-only) / C (combined) (`reports/feature_ablation.md`)
+
+Semua pakai dataset/label/split/censoring yang SAMA - hanya kolom fitur yang
+berbeda:
+
+| Experiment | VAL C-index (RSF) | TEST C-index (RSF) | VAL C-index (Cox) |
+|---|---|---|---|
+| A_current (19 fitur classification warisan) | 0,8078 | 0,8051 | 0,7706 |
+| B_context_only (part_model/client/item_type/place SAJA, tanpa riwayat) | 0,6547 | 0,6227 | 0,6678 |
+| A + item_type_at_install | **0,8118** | 0,8034 | 0,7809 |
+| A + place_at_install | 0,8089 | 0,8091 | 0,7625 |
+| C_combined (A + item_type + place) | 0,8074 | 0,8036 | 0,7716 |
+
+Temuan penting, dilaporkan apa adanya (bukan dipaksa ke satu arah):
+- **B_context_only jauh di bawah A** (0,65 vs 0,81) - konteks instalasi
+  SENDIRIAN, tanpa riwayat kejadian, TIDAK cukup untuk memprediksi
+  durasi-hidup. Riwayat kejadian (corrective/failure/frekuensi historis)
+  tetap jadi sinyal utama, bukan identitas part/lokasi/client.
+- **`item_type_at_install` menambah signal nyata** di atas A (0,8078 ->
+  0,8118 VAL) - satu-satunya fitur konteks baru yang lolos.
+- **`place_at_install` TIDAK dipertahankan**: menaikkan skor SENDIRIAN
+  (0,8089) tapi begitu digabung dengan `item_type_at_install` (C_combined)
+  skornya malah TURUN ke 0,8074 - interaksi negatif, bukan aditif. Sesuai
+  instruksi "jangan pertahankan fitur hanya karena sudah ada di
+  classification", `place_at_install` di-drop dari kombinasi final meski
+  sempat diuji serius.
+
+### 6. Audit `previous_cycle_lifetime_mean` (`reports/previous_cycle_audit.md`)
+
+Fitur lama `previous_cycle_lifetime_mean` (dari SQL `get_cycles()`) TERBUKTI
+mencampur rata-rata durasi siklus sebelumnya APA PUN cara berakhirnya
+(FAILURE, RIGHT_CENSORED_AT_DATA_END, REINSTALL_WITHOUT_RECORDED_FAILURE) -
+BUKAN murni "lifetime sampai gagal" seperti namanya menyiratkan. Pengecekan
+manual pada data nyata menemukan contoh konkret: satu item punya
+`previous_cycle_lifetime_mean=2511,79` yang ternyata berasal dari siklus
+sebelumnya yang berakhir `REINSTALL_WITHOUT_RECORDED_FAILURE` (PART
+dilepas-pasang ulang TANPA failure tercatat), bukan dari kegagalan
+sungguhan - salah label lifetime.
+
+Diuji di atas konfigurasi terbaik dari ablation (A + item_type_at_install):
+
+| Varian | VAL C-index | TEST C-index |
 |---|---|---|
-| Random Survival Forest | 0,8078 | 0,8051 |
-| Cox PH | 0,7706 | 0,8149 |
+| existing (`previous_cycle_lifetime_mean`, campur semua) | 0,8109 | 0,8015 |
+| **confirmed_failure_only** (hanya siklus sebelumnya yang FAILURE) | **0,8120** | 0,8096 |
+| last_confirmed_failure (bukan rata-rata, hanya siklus FAILURE terakhir) | 0,8093 | 0,8106 |
+| confirmed_failure_only + `previous_cycle_end_reason` | 0,8113 | 0,8108 |
 
-Keduanya mengalahkan tebakan acak (0,5) dengan jelas - PROOF OF CONCEPT
-bahwa formulasi survival BISA memisahkan lifecycle berumur pendek dari yang
-panjang secara wajar.
+`confirmed_failure_only` dipilih (VAL 0,8120 > existing 0,8109).
+`previous_cycle_end_reason` TIDAK dipertahankan (0,8113 <= 0,8120 - tidak
+menaikkan VALIDATION lebih lanjut).
 
-### 6. Metrik survival lain
+### 7. RSF tuning kecil (`reports/model_comparison.md`)
 
-| Model | Split | Integrated Brier Score | Brier 30d | Brier 60d | Brier 90d | Brier 120d |
-|---|---|---|---|---|---|---|
-| RSF | VALIDATION | 0,0771 | 0,0652 | 0,0767 | 0,0806 | 0,0829 |
-| RSF | TEST | 0,0801 | 0,0810 | 0,0818 | 0,0795 | 0,0771 |
-| Cox PH | VALIDATION | 0,0921 | 0,0754 | 0,0927 | 0,0959 | 0,1003 |
-| Cox PH | TEST | 0,0868 | 0,0843 | 0,0884 | 0,0867 | 0,0861 |
+Pencarian coordinate-wise kecil (bukan grid penuh) di sekitar hyperparameter
+current - `n_estimators∈{200,400}`, `min_samples_leaf∈{10,20,30,50}`,
+`max_features∈{sqrt,0.5,1.0}`, `max_depth∈{None,8,12}`, 10 trial, dipilih
+dari VALIDATION:
 
-Time-dependent AUC (RSF, TEST): 30d=0,838, 60d=0,868, 90d=0,882, 120d=0,905 -
-lengkap di `reports/evaluation_report.md`.
+**Tidak ada satu pun trial yang mengalahkan default/current
+(VAL C-index=0,8120)** - kombinasi `n_estimators=100, min_samples_split=40,
+min_samples_leaf=30, max_features=sqrt, max_depth=None` yang sudah dipakai
+sejak sesi sebelumnya TERBUKTI sudah berada pada/dekat titik optimal untuk
+kombinasi fitur ini. Perubahan `max_features` ke 0,5/1,0 justru menurunkan
+skor paling nyata (0,8069/0,8087 VAL, dan TEST turun sampai 0,78-0,80) -
+mengurangi randomness antar-pohon RSF pada dataset sekecil ini merugikan,
+bukan membantu.
 
-### 7. Risk performance 30/60/90/120 hari & 8. Perbandingan fair dengan existing (Lapis 2)
+### 8. Hasil final (`train.py` + `evaluate.py`, konfigurasi terpilih di atas)
 
-37.923 dari 38.451 baris TEST classification (211 hari window, kapasitas
-200/bulan) cocok dengan lifecycle survival dan dievaluasi dengan
-`P(fail<=30 hari | selamat sampai umur A) = 1-S(A+30)/S(A)`, dinilai dengan
-`training_utils.full_metrics()` yang SAMA PERSIS dipakai `train.py`
-classification:
+**Catatan metodologis**: tabel tuning di poin 7 memakai `part_model_category`
+threshold=300 (klasifikasi, bawaan alur eksperimen ablation/tuning yang
+dibangun di atas fitur `feature_builder.build_features()` apa adanya) -
+BUKAN threshold=200 yang divalidasi terpisah sebagai lebih baik di poin 4.
+Integrasi produksi final (`src/features.py`) mengoreksi ini dan memakai
+threshold=200 yang benar-benar tervalidasi. Karena itu angka final di bawah
+(dari `train.py`/`evaluate.py` sungguhan) sedikit berbeda dari tabel poin 7
+- **angka di bawah ini yang otoritatif**, karena inilah model yang benar-
+benar disimpan di `artifacts/` dan dipakai `predict.py`.
 
-| Model | PR-AUC | ROC-AUC | Recall@200/bln | Precision@200/bln | Brier |
+**C-index (Lapis 1, native survival, dari t=0=installed_on) - Harrell vs
+Uno/IPCW:**
+
+| Model | Split | C-index (Harrell) | C-index (Uno/IPCW) | IBS |
+|---|---|---|---|---|
+| Random Survival Forest | VALIDATION | 0,8114 | 0,8117 | 0,0764 |
+| Random Survival Forest | TEST | 0,8082 | 0,8083 | 0,0811 |
+| Cox PH | VALIDATION | 0,7819 | 0,7821 | 0,0859 |
+| Cox PH | TEST | 0,7722 | 0,7724 | 0,0950 |
+
+Harrell dan Uno/IPCW **nyaris identik** di semua split/model (selisih
+<=0,0003) - indikasi kuat TIDAK ada bias sensor besar yang mendistorsi
+Harrell C-index sederhana; keduanya boleh dipakai sebagai headline number
+dengan percaya diri yang sama.
+
+**Brier score & time-dependent AUC per horizon:**
+
+| Model | Split | Brier 30d | Brier 60d | Brier 90d | Brier 120d | AUC 30d | AUC 60d | AUC 90d | AUC 120d |
+|---|---|---|---|---|---|---|---|---|---|
+| RSF | VALIDATION | 0,0627 | 0,0755 | 0,0805 | 0,0836 | 0,7991 | 0,8261 | 0,8450 | 0,8546 |
+| RSF | TEST | 0,0807 | 0,0827 | 0,0808 | 0,0790 | 0,8424 | 0,8690 | 0,8827 | 0,9051 |
+| Cox PH | VALIDATION | 0,0684 | 0,0853 | 0,0899 | 0,0965 | 0,7683 | 0,7943 | 0,8166 | 0,8249 |
+| Cox PH | TEST | 0,0912 | 0,0963 | 0,0952 | 0,0958 | 0,8027 | 0,8288 | 0,8449 | 0,8650 |
+
+Semua horizon (30/60/90/120 hari) berada dalam rentang follow-up split
+TEST (maks ~211 hari) - tidak ada horizon yang perlu dilaporkan "N/A".
+
+**Perbandingan operasional adil vs classification production (Lapis 2)** -
+37.923 dari 38.451 baris TEST classification (kapasitas 200/bulan) cocok
+dengan lifecycle survival, dinilai `training_utils.full_metrics()` yang SAMA
+PERSIS dipakai `train.py` classification:
+
+| Model | PR-AUC | ROC-AUC | Recall@cap | Precision@cap | Brier |
 |---|---|---|---|---|---|
-| Random Survival Forest | 0,1558 | 0,7065 | 0,3142 | 0,1983 | 0,0214 |
-| Cox PH | 0,1115 | 0,7063 | 0,2173 | 0,1372 | 0,0221 |
-| **Classification (production, v2)** | **0,1607** | **0,8206** | **0,3359** | **0,2154** | 0,0215 |
+| Random Survival Forest | **0,1633** | 0,6871 | 0,3108 | 0,1962 | 0,0214 |
+| Cox PH | 0,0939 | 0,6893 | 0,1869 | 0,1180 | 0,0224 |
+| **Classification (production, v2)** | 0,1607 | **0,8206** | **0,3359** | **0,2154** | 0,0215 |
 
-Dibaca apa adanya: **classification model tetap lebih baik untuk tugas
-operasional 30-hari** ini, di semua metrik ranking (ROC-AUC selisihnya
-paling nyata: 0,71 vs 0,82) - sesuai prediksi di bagian "Keterbatasan"
-(fitur classification di-refresh tiap 30 hari, fitur survival beku di
-kondisi instalasi). Brier score nyaris identik (0,0214 vs 0,0215) - keduanya
-sama-sama terkalibrasi cukup baik pada skala absolut, bedanya di
-KEMAMPUAN MENGURUTKAN mana yang lebih berisiko. RSF tetap mengalahkan Cox
-PH cukup jelas di sisi PR-AUC/Recall/Precision pada tugas ini.
+### 9. Fitur yang benar-benar membantu vs tidak
 
-### 9. Potensi leakage / isu data yang ditemukan
+**Membantu (dipertahankan di final):**
+- `item_type_at_install_grouped` - signal instalasi baru yang konsisten
+  menaikkan VAL C-index (poin 5).
+- `previous_cycle_confirmed_failure_lifetime_mean` (confirmed-failure-only,
+  ganti fitur lama) - lebih jujur secara definisi DAN validasinya lebih
+  baik (poin 6).
+- Threshold `part_model_category=200` (bukan 300 classification) - lebih
+  cocok untuk skala survival (poin 4).
+
+**Tidak membantu / di-drop meski sempat diuji serius:**
+- `place_at_install` - berinteraksi negatif dengan `item_type_at_install`
+  (poin 5), TIDAK diikutkan meski fitur ini "ada" di data instalasi.
+- `previous_cycle_end_reason` - tidak menaikkan VALIDATION lebih lanjut di
+  atas confirmed_failure_only (poin 6).
+- Tuning hyperparameter RSF di luar default - tidak ada trial yang menang
+  (poin 7); performa dibatasi oleh fitur, bukan hyperparameter.
+- `device_type`/`device_model` - tidak dicoba sama sekali karena tidak
+  tersedia tanpa mapping baru (poin 3).
+
+### 10. Potensi keterbatasan data
 
 - **1.234 item (7,5%)** punya lifecycle di lebih dari satu split (cycle
-  awal di TRAIN, cycle berikutnya di TEST/VALIDATION) - bukan leakage
-  temporal, tapi potensi model "mengenali" identitas item lewat fitur
-  `previous_cycle_lifetime_mean`. Tidak diperbaiki (lihat README bagian
-  Leakage prevention).
-- Base rate event menurun antar split (20,3% -> 16,6% -> 13,1%) - karena
-  perbedaan panjang follow-up, bukan sinyal fleet membaik (lihat poin 1-2
-  di atas).
-- Model classification production (v2) dievaluasi ulang di sini via
-  `train.build_dataset()` (bukan angka dari `metadata.json` production
-  secara langsung untuk baris/populasi, tapi `promotion_comparison`
-  candidate-nya) - konsisten dengan `evaluation_metrics.test` di
-  `models/failure/CURRENT/metadata.json`.
+  awal di TRAIN, cycle berikutnya di TEST/VALIDATION) - BUKAN leakage
+  temporal (urutan waktu tetap terjaga), tapi potensi model "mengenali"
+  identitas item lewat fitur previous-cycle. Didokumentasikan, tidak
+  diperbaiki (lihat bagian "Leakage prevention" di atas).
+- Base rate event menurun antar split (20,3% -> 16,6% -> 13,1%) karena
+  perbedaan panjang follow-up, bukan sinyal fleet membaik.
+- Threshold `place_at_install=50` divalidasi tapi TIDAK dipakai final -
+  fitur itu sendiri dibuang di tahap ablation (poin 5), bukan berarti
+  eksperimen thresholdnya sia-sia - tetap menjadi bukti proses pemilihan
+  threshold yang tervalidasi, bukan tebakan.
 - Riset lama (`db_om_preparation`) sudah pernah mencoba Cox PH/RSF/XGBoost
-  AFT dan kalah dari model resmi (dicatat di README root) - eksperimen ini
-  MEREPRODUKSI temuan itu dengan metodologi yang diperbaiki (censoring
-  per-split, bukan snapshot classification dipaksa jadi survival), dan bisa
-  menjelaskan SEBAGIAN alasannya secara eksplisit: keunggulan classification
+  AFT dan kalah dari model resmi. Audit ini MEREPRODUKSI temuan itu dengan
+  metodologi yang diperbaiki (censoring per-split, fitur baseline instalasi
+  eksplisit, bukan snapshot classification dipaksa jadi survival), dan
+  menjelaskan SEBAGIAN kenapa: keunggulan classification pada tugas 30-hari
   banyak berasal dari fitur yang lebih segar (di-refresh tiap 30 hari),
   bukan semata algoritma classification vs survival.
 
-### 10. Rekomendasi akhir
+### 11. Stabilitas hasil tanpa bergantung pada fitur warisan classification
 
-**Survival model TIDAK direkomendasikan menggantikan model classification**
-untuk tugas operasional "PART mana yang perlu diprioritaskan bulan ini" -
-classification production tetap lebih baik pada SEMUA metrik ranking di
-perbandingan adil Lapis 2 (poin 8).
+Ablation B_context_only (fitur instalasi murni, TANPA satu pun fitur
+riwayat warisan classification) hanya mencapai VAL C-index 0,6547 - jauh di
+bawah A (0,8078). Ini artinya performa survival model **TIDAK stabil/tidak
+cukup tanpa fitur riwayat kejadian** - konteks instalasi saja tidak
+memadai. Namun fitur riwayat yang dipertahankan (prior failure/corrective
+count, frekuensi historis, kondisi armada) BUKAN artefak arbitrer
+classification - semuanya point-in-time-safe dan business-justified secara
+independen (riwayat kegagalan part sejenis memang secara masuk akal
+memprediksi durasi hidup part baru). Kesimpulan: hasil final **bergantung**
+pada fitur riwayat (bukan semata identitas/konteks statis), tapi TIDAK
+"curang" meniru classification - fitur riwayat itu sendiri lolos audit
+per-fitur secara independen (poin 9).
 
-**Survival model layak sebagai CHALLENGER/pelengkap**, bukan pengganti,
-untuk pertanyaan yang classification TIDAK bisa jawab secara native:
+### 12. Rekomendasi akhir
+
+**C. Survival model layak sebagai challenger/pelengkap** model
+classification, **bukan pengganti** dan **belum perlu lanjut ke dynamic/
+event-based survival**.
+
+Alasan, dibaca apa adanya dari angka di atas:
+
+- Pada tugas NATIVE-nya (ranking seluruh lifetime, C-index Harrell & Uno
+  nyaris identik ~0,81 VAL/TEST, AUC time-dependent naik konsisten
+  0,80->0,91 dari horizon 30d ke 120d), survival model **metodologis dan
+  konsisten** - bukan re-hash percobaan lama yang gagal begitu saja.
+- Pada tugas OPERASIONAL 30-hari (Lapis 2, populasi sama dengan
+  classification), classification production **masih jelas lebih baik**
+  di ROC-AUC (0,82 vs 0,69) dan Recall/Precision@kapasitas - sesuai
+  prediksi di bagian "Keterbatasan" (fitur classification di-refresh tiap
+  30 hari, fitur survival beku di kondisi instalasi). **TIDAK cukup alasan
+  untuk merekomendasikan opsi D** (classification tetap satu-satunya) -
+  survival model sudah MENGUNGGULI classification di PR-AUC (0,1633 vs
+  0,1607) untuk pertama kalinya setelah audit ini, sinyal bahwa formulasi
+  dan fitur barunya nyata membantu, bukan hanya C-index yang naik secara
+  kosmetik.
+- Seluruh audit (B_context_only yang jelek, place_at_install yang
+  di-drop, tuning yang tidak membantu) menunjukkan performa dibatasi oleh
+  KETERSEDIAAN INFORMASI point-in-time-safe pada `installed_on`, bukan oleh
+  pilihan model/hyperparameter - artinya jalan paling menjanjikan untuk
+  peningkatan lebih lanjut BUKAN tuning lebih agresif atau fitur konteks
+  tambahan yang sudah terbukti lemah, melainkan **landmarking/time-varying
+  covariates** (fitur di-refresh berkala seperti classification, target
+  tetap durasi-ke-event) - sesuai instruksi, ini sengaja TIDAK dikerjakan
+  sekarang karena hasil static survival TERBUKTI belum "buntu" (masih ada
+  ruang perbaikan yang jelas via arah itu, bukan sudah mentok), dan
+  mengerjakannya sekarang akan mengembalikan bentuk grid 30-harian yang
+  ingin dihindari sejak awal eksperimen ini.
+
+Ringkasnya: **pakai survival model sebagai pelengkap untuk pertanyaan
 "berapa lama PART ini diperkirakan bertahan" (median survival time, kurva
-`S(t)` penuh) - berguna untuk perencanaan kapasitas/stok jangka menengah-
-panjang, bukan prioritisasi harian/bulanan. C-index 0,80-0,81 pada tugas
-native-nya (ranking seluruh lifetime) menunjukkan formulasinya SAH secara
-metodologis, bukan sekadar re-hash percobaan lama yang gagal.
-
-Kalau ke depannya ingin mendekati performa classification pada tugas
-30-hari SAMBIL mempertahankan output survival (kurva S(t), median survival),
-langkah lanjutan yang paling menjanjikan adalah landmarking/time-varying
-covariates (fitur di-refresh berkala seperti classification, tapi target
-tetap durasi-ke-event) - sengaja TIDAK dikerjakan di eksperimen ini karena
-akan mengembalikan bentuk grid 30-harian yang ingin dihindari di awal, dan
-di luar cakupan "jangan overengineering" untuk pembuktian formulasi awal ini.
+S(t) penuh, perencanaan kapasitas/stok jangka menengah-panjang)**, TETAP
+pakai classification production untuk prioritisasi operasional bulanan
+"PART mana yang perlu ditindak sekarang".
 
 ---
 
 Angka lengkap (semua split, semua metrik, evaluasi mentah): lihat
 `artifacts/metadata.json` dan `reports/evaluation_report.md` (dihasilkan
 `train.py`/`evaluate.py`, akan berubah kalau dijalankan ulang pada data
-yang lebih baru).
+yang lebih baru). Jejak audit lengkap: `reports/category_threshold.md`,
+`reports/feature_ablation.md`, `reports/previous_cycle_audit.md`,
+`reports/model_comparison.md` (dihasilkan `experiments.py`, hasil satu kali
+jalan yang dipakai memutuskan konfigurasi final - tidak dijalankan ulang
+otomatis oleh `train.py`).

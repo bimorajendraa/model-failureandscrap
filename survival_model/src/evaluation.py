@@ -11,7 +11,13 @@ bukan diam-diam dilewati atau membuat evaluasi gagal total.
 from __future__ import annotations
 
 import numpy as np
-from sksurv.metrics import brier_score, concordance_index_censored, cumulative_dynamic_auc, integrated_brier_score
+from sksurv.metrics import (
+    brier_score,
+    concordance_index_censored,
+    concordance_index_ipcw,
+    cumulative_dynamic_auc,
+    integrated_brier_score,
+)
 
 from . import utils
 
@@ -43,6 +49,20 @@ def native_metrics(model, y_train, x_eval, y_eval) -> dict:
         "c_index": float(c_index),
         "max_followup_days": float(y_eval["time"].max()),
     }
+
+    # Harrell C-index bisa bias optimis kalau censoring TIDAK acak terhadap
+    # fitur (plausibel di sini: lifecycle yang installed_on-nya belakangan
+    # otomatis lebih sering censored - lihat README bagian "Base rate
+    # menurun antar split"). Uno/IPCW C-index menimbang ulang lewat model
+    # censoring, jadi kurang bias oleh pola itu - dilaporkan berdampingan,
+    # bukan menggantikan Harrell. tau dibatasi ke rentang follow-up yang
+    # sama dipakai IBS/Brier/AUC di bawah supaya konsisten satu file ini.
+    limit = min(float(y_train["time"].max()), float(y_eval["time"].max()))
+    try:
+        uno_c_index = concordance_index_ipcw(y_train, y_eval, risk, tau=limit * 0.99)[0]
+        result["uno_c_index"] = float(uno_c_index)
+    except ValueError:
+        result["uno_c_index"] = None
 
     horizons = _usable_horizons(y_train, y_eval)
     result["horizons_evaluable_days"] = horizons
