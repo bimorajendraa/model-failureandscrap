@@ -18,11 +18,11 @@ ui.sidebar_status()
 
 st.title("Perencanaan Penggantian")
 st.caption(
-    "PART dengan risiko kerusakan MEDIUM/HIGH sekaligus risiko scrap HIGH."
+    "PART dengan risiko kerusakan sedang/tinggi, dan risiko rusak total tinggi."
 )
 
 st.warning(
-    "**Ini bukan daftar PART yang akan dibuang.** Risiko scrap bersifat "
+    "**Ini bukan daftar PART yang akan dibuang.** Risiko rusak total bersifat "
     "bersyarat - peluang PART tidak bisa diperbaiki JIKA rusak. Daftar ini "
     "gunanya untuk menyiapkan stok pengganti lebih awal, bukan untuk "
     "memutuskan penggantian."
@@ -36,13 +36,14 @@ except api_client.ApiError as error:
 
 if not data["items"]:
     st.success(
-        "Saat ini tidak ada PART yang risiko kerusakan dan risiko scrap-nya "
-        "sama-sama tinggi."
+        "Saat ini tidak ada PART yang risiko kerusakan dan risiko rusak "
+        "totalnya sama-sama tinggi."
     )
     st.stop()
 
-st.metric("Kandidat penggantian", f"{data['total']:,}")
-st.caption(f"Data sampai {data['scored_at']['data_through']}")
+with st.container(border=True):
+    st.metric("Kandidat penggantian", f"{data['total']:,}")
+    st.caption(f"Data sampai {data['scored_at']['data_through']}")
 
 ui.priority_table(
     data["items"],
@@ -66,15 +67,16 @@ ui.priority_table(
 )
 
 st.caption(
-    "*Risiko mati 30H* = peluang rusak dalam 30 hari x peluang tidak bisa "
-    "diperbaiki. Kejadiannya jarang, jadi kolom ini lebih cocok dipakai untuk "
-    "mengurutkan perencanaan stok daripada sebagai pemicu tindakan per PART."
+    "*Peluang harus diganti (30H)* = peluang rusak dalam 30 hari dikali "
+    "peluang rusak total kalau sampai rusak. Kejadiannya jarang, jadi kolom "
+    "ini lebih cocok dipakai untuk mengurutkan perencanaan stok daripada "
+    "sebagai pemicu tindakan per PART."
 )
 
 st.divider()
 st.subheader("Sebaran jenis PART")
 types = {}
 for item in data["items"]:
-    label = item.get("item_type") or "TIDAK DIKETAHUI"
+    label = item.get("item_type") or "Tidak diketahui"
     types[label] = types.get(label, 0) + 1
-st.bar_chart(types, horizontal=True)
+st.bar_chart(types, horizontal=True, color="#2563EB")

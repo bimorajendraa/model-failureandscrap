@@ -20,10 +20,13 @@ except api_client.ApiError as error:
     st.stop()
 
 
-def _choice(label: str, options: list[str], default: str | None = None) -> str | None:
+def _choice(
+    label: str, options: list[str], default: str | None = None, labels: dict | None = None
+) -> str | None:
     all_options = ["Semua", *options]
     index = all_options.index(default) if default in all_options else 0
-    value = st.selectbox(label, all_options, index=index)
+    format_func = (lambda v: labels.get(v, v)) if labels else (lambda v: v)
+    value = st.selectbox(label, all_options, index=index, format_func=format_func)
     return None if value == "Semua" else value
 
 
@@ -32,23 +35,24 @@ def _choice(label: str, options: list[str], default: str | None = None) -> str |
 # Detail PART.
 default_location = st.session_state.pop("priority_location_filter", None)
 
-search = st.text_input(
-    "Cari Item ID",
-    placeholder="sebagian ID sudah cukup, mis. 0112011",
-    help="Cocok sebagian - tidak perlu mengetik ID lengkap.",
-).strip()
+with st.container(border=True):
+    search = st.text_input(
+        "Cari Item ID",
+        placeholder="sebagian ID sudah cukup, mis. 0112011",
+        help="Cocok sebagian - tidak perlu mengetik ID lengkap.",
+    ).strip()
 
-row = st.columns(5)
-with row[0]:
-    risk = _choice("Kelompok risiko", available["risk_levels"])
-with row[1]:
-    item_type = _choice("Jenis PART", available["item_types"])
-with row[2]:
-    client = _choice("Client", available["clients"])
-with row[3]:
-    location = _choice("Lokasi", available["locations"], default=default_location)
-with row[4]:
-    limit = st.number_input("Jumlah baris", min_value=10, max_value=500, value=50, step=10)
+    row = st.columns(5)
+    with row[0]:
+        risk = _choice("Tingkat risiko", available["risk_levels"], labels=ui.RISK_LEVEL_LABELS)
+    with row[1]:
+        item_type = _choice("Jenis PART", available["item_types"])
+    with row[2]:
+        client = _choice("Client", available["clients"])
+    with row[3]:
+        location = _choice("Lokasi", available["locations"], default=default_location)
+    with row[4]:
+        limit = st.number_input("Jumlah baris", min_value=10, max_value=500, value=50, step=10)
 
 try:
     data = api_client.recommendations(

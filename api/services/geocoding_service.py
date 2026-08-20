@@ -41,7 +41,16 @@ CACHE_PATH = ROOT_DIR / ".cache" / "geocode.json"
 # sedikit ruang - mencakup seluruh area operasi client yang tercatat di data,
 # termasuk bandara Soekarno-Hatta. Diturunkan dari cakupan operasi client yang
 # ada di data, bukan angka bulat yang dikarang.
-JABODETABEK_BBOX = {"south": -6.60, "north": -5.80, "west": 106.30, "east": 107.20}
+#
+# Batas barat SENGAJA dipepetkan ke 106.23, bukan dibulatkan lebar: cukup
+# untuk mencakup Rangkasbitung (koordinat asli 106.2516, ujung jalur KRL
+# Commuter Line yang batas lama 106.30 salah membuangnya), tetapi tetap
+# membuang stasiun jalur Merak yang bukan Commuter Line walau nama tempatnya
+# juga muncul di data dan geografis berdekatan - Walantaka (106.2188) paling
+# dekat, lalu Serang/Karangantu/Cilegon/Krenceng/Merak semuanya lebih barat
+# lagi. Batasnya diverifikasi terhadap koordinat asli tiap nama tempat di
+# atas, bukan ditaksir dari peta.
+JABODETABEK_BBOX = {"south": -6.60, "north": -5.80, "west": 106.23, "east": 107.20}
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "production-ml-predictive-maintenance/1.0 (internal tool)"

@@ -39,11 +39,12 @@ unresolved = data["unresolved"]
 checked = [item for item in unresolved if item["checked"]]
 pending = [item for item in unresolved if not item["checked"]]
 
-columns = st.columns(4)
-columns[0].metric("Lokasi aktif", f"{len(resolved) + len(unresolved):,}")
-columns[1].metric("Sudah ada titik di peta", f"{len(resolved):,}")
-columns[2].metric("Tidak lolos penyaringan", f"{len(checked):,}")
-columns[3].metric("Belum sempat dicoba", f"{len(pending):,}")
+with st.container(border=True):
+    columns = st.columns(4)
+    columns[0].metric("Lokasi aktif", f"{len(resolved) + len(unresolved):,}")
+    columns[1].metric("Sudah ada titik di peta", f"{len(resolved):,}")
+    columns[2].metric("Belum ketemu koordinatnya", f"{len(checked):,}")
+    columns[3].metric("Belum sempat dicoba", f"{len(pending):,}")
 
 if pending:
     st.info(
@@ -112,22 +113,23 @@ if resolved:
 
     if selected:
         point = selected[0]
-        st.markdown(f"### 📍 {point['location']}")
-        detail = st.columns(4)
-        detail[0].metric("PART aktif", f"{point['active_parts']:,}")
-        detail[1].metric("Risiko tinggi", f"{point['high_risk_parts']:,}")
-        detail[2].metric("Risiko sedang", f"{point['medium_risk_parts']:,}")
-        detail[3].metric("Kandidat penggantian", f"{point['replacement_candidates']:,}")
-        if st.button(f"📋 Lihat daftar PART di {point['location']}"):
-            st.session_state["priority_location_filter"] = point["location"]
-            st.switch_page("pages/1_Prioritas_Perawatan.py")
+        with st.container(border=True):
+            st.markdown(f"### 📍 {point['location']}")
+            detail = st.columns(4)
+            detail[0].metric("PART aktif", f"{point['active_parts']:,}")
+            detail[1].metric("Risiko tinggi", f"{point['high_risk_parts']:,}")
+            detail[2].metric("Risiko sedang", f"{point['medium_risk_parts']:,}")
+            detail[3].metric("Kandidat penggantian", f"{point['replacement_candidates']:,}")
+            if st.button(f"📋 Lihat daftar PART di {point['location']}"):
+                st.session_state["priority_location_filter"] = point["location"]
+                st.switch_page("pages/1_Prioritas_Perawatan.py")
     else:
         st.caption("Belum ada titik dipilih.")
 
     st.caption(
-        ":red[**merah**] = ada PART risiko tinggi · "
-        ":orange[**oranye**] = ada PART risiko sedang, tidak ada yang tinggi · "
-        ":blue[**biru**] = tidak ada PART risiko tinggi/sedang di lokasi ini. "
+        ":red-badge[merah] = ada PART risiko tinggi · "
+        ":orange-badge[oranye] = ada PART risiko sedang, tidak ada yang tinggi · "
+        ":blue-badge[biru] = tidak ada PART risiko tinggi/sedang di lokasi ini. "
         "Ukuran titik mengikuti jumlah PART risiko tinggi."
     )
 

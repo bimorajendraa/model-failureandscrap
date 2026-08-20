@@ -1,4 +1,11 @@
-"""Potongan tampilan yang dipakai beberapa halaman."""
+"""Potongan tampilan yang dipakai beberapa halaman.
+
+Bahasa yang ditampilkan ke pengguna sengaja diterjemahkan dari kode mentah
+backend (mis. "PRIORITIZE_INSPECTION", "HIGH") ke istilah biasa yang konsisten
+di seluruh dashboard - lihat *_LABELS di bawah. Nilai mentahnya sendiri (yang
+dikirim balik ke API sebagai filter, atau dipakai mencocokkan baris) tidak
+disentuh, hanya cara menampilkannya.
+"""
 
 from __future__ import annotations
 
@@ -7,11 +14,27 @@ import streamlit as st
 
 import api_client
 
-RISK_BADGES = {
-    "CRITICAL": ":red[**CRITICAL**]",
-    "HIGH": ":red[**HIGH**]",
-    "MEDIUM": ":orange[**MEDIUM**]",
-    "LOW": ":green[**LOW**]",
+# ---------------------------------------------------------------------------
+# Istilah: kode mentah backend -> bahasa biasa, konsisten di seluruh halaman
+# ---------------------------------------------------------------------------
+
+RISK_LEVEL_LABELS = {"HIGH": "Tinggi", "MEDIUM": "Sedang", "LOW": "Rendah"}
+RISK_LEVEL_COLORS = {"HIGH": "red", "MEDIUM": "orange", "LOW": "green"}
+
+PRIORITY_LABELS = {
+    "CRITICAL": "Sangat mendesak",
+    "HIGH": "Mendesak",
+    "MEDIUM": "Sedang",
+    "LOW": "Rendah",
+}
+PRIORITY_COLORS = {"CRITICAL": "red", "HIGH": "orange", "MEDIUM": "yellow", "LOW": "green"}
+
+ACTION_LABELS = {
+    "INSPECT_AND_PREPARE_REPLACEMENT": "Periksa & siapkan pengganti",
+    "PRIORITIZE_INSPECTION": "Segera periksa",
+    "SCHEDULE_INSPECTION_AND_REVIEW_STOCK": "Jadwalkan periksa & cek stok",
+    "SCHEDULE_INSPECTION": "Jadwalkan pemeriksaan",
+    "MONITOR": "Pantau saja",
 }
 
 PROBABILITY_COLUMNS = [
@@ -22,6 +45,15 @@ PROBABILITY_COLUMNS = [
     "scrap_probability",
     "death_probability_30d",
 ]
+
+# Kolom yang isinya kode mentah backend dan perlu diterjemahkan sebelum
+# ditampilkan di tabel - lihat _translate_values().
+_TRANSLATED_COLUMNS = {
+    "failure_risk_level": RISK_LEVEL_LABELS,
+    "scrap_risk_level": RISK_LEVEL_LABELS,
+    "priority": PRIORITY_LABELS,
+    "recommended_action": ACTION_LABELS,
+}
 
 COLUMN_LABELS = {
     "rank": "#",
@@ -35,10 +67,10 @@ COLUMN_LABELS = {
     "failure_probability_60d": "Risiko 60H",
     "failure_probability_90d": "Risiko 90H",
     "failure_probability_120d": "Risiko 120H",
-    "failure_risk_level": "Kelompok risiko",
-    "scrap_probability": "Risiko scrap",
-    "scrap_risk_level": "Kelompok scrap",
-    "death_probability_30d": "Risiko mati 30H",
+    "failure_risk_level": "Tingkat risiko rusak",
+    "scrap_probability": "Peluang rusak total",
+    "scrap_risk_level": "Tingkat risiko rusak total",
+    "death_probability_30d": "Peluang harus diganti (30H)",
     "priority": "Prioritas",
     "recommended_action": "Tindakan",
     "active_parts": "PART aktif",
@@ -71,7 +103,7 @@ def sidebar_status() -> None:
         versions = status["model_version"]
         st.caption(
             f"Model kerusakan: **{versions.get('failure')}** · "
-            f"Model scrap: **{versions.get('scrap')}**"
+            f"Model rusak total: **{versions.get('scrap')}**"
         )
         cache = status["batch_cache"]
         if cache["ready"]:
@@ -79,7 +111,22 @@ def sidebar_status() -> None:
 
 
 def risk_badge(level: str | None) -> str:
-    return RISK_BADGES.get(level, "-")
+    """Lencana kelompok risiko kerusakan/rusak total (HIGH/MEDIUM/LOW)."""
+    if level not in RISK_LEVEL_LABELS:
+        return "-"
+    return f":{RISK_LEVEL_COLORS[level]}-badge[{RISK_LEVEL_LABELS[level]}]"
+
+
+def priority_badge(priority: str | None) -> str:
+    """Lencana prioritas tindakan (CRITICAL/HIGH/MEDIUM/LOW)."""
+    if priority not in PRIORITY_LABELS:
+        return "-"
+    return f":{PRIORITY_COLORS[priority]}-badge[{PRIORITY_LABELS[priority]}]"
+
+
+def action_label(action: str | None) -> str:
+    """Kode tindakan mentah -> kalimat biasa."""
+    return ACTION_LABELS.get(action, action or "-")
 
 
 # RGBA (0-255) untuk titik peta - dipisah jadi konstanta supaya kalimat
@@ -104,8 +151,19 @@ def risk_marker_radius(high_risk_parts: int) -> int:
     return 120 + int(high_risk_parts) * 60
 
 
+def _translate_values(frame: pd.DataFrame) -> pd.DataFrame:
+    """Kode mentah (HIGH, PRIORITIZE_INSPECTION, ...) -> bahasa biasa, hanya
+    untuk kolom yang memang berisi kode semacam itu."""
+    frame = frame.copy()
+    for column, labels in _TRANSLATED_COLUMNS.items():
+        if column in frame.columns:
+            frame[column] = frame[column].map(lambda value: labels.get(value, value))
+    return frame
+
+
 def priority_table(items: list[dict], columns: list[str], key: str = "priority_table") -> None:
-    """Tabel daftar PART dengan probabilitas ditampilkan sebagai persen.
+    """Tabel daftar PART dengan probabilitas ditampilkan sebagai persen dan
+    kode mentah diterjemahkan ke bahasa biasa.
 
     Klik satu baris untuk memilihnya, lalu tombol "Lihat Detail" muncul di
     bawah tabel dan membawa ke halaman Detail PART untuk PART tersebut.
@@ -118,7 +176,7 @@ def priority_table(items: list[dict], columns: list[str], key: str = "priority_t
 
     frame = pd.DataFrame(items)
     present = [column for column in columns if column in frame.columns]
-    display = frame[present].copy()
+    display = _translate_values(frame[present])
     for column in PROBABILITY_COLUMNS:
         if column in display.columns:
             display[column] = display[column].map(api_client.percent)
@@ -157,8 +215,9 @@ def labeled_table(items: list[dict], columns: list[str], empty_message: str = ""
         return
     frame = pd.DataFrame(items)
     present = [column for column in columns if column in frame.columns]
+    display = _translate_values(frame[present])
     st.dataframe(
-        frame[present].rename(columns=COLUMN_LABELS),
+        display.rename(columns=COLUMN_LABELS),
         width="stretch",
         hide_index=True,
     )
