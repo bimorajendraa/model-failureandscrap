@@ -47,7 +47,8 @@ from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from partrisk import config, data_reader, scrap_features, training_utils
+from partrisk import config, scrap_features, training_utils
+from partrisk.data import reader as data_reader
 
 CURRENT_POINTER = config.SCRAP_MODEL_DIR / "CURRENT"
 

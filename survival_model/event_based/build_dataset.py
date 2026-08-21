@@ -42,7 +42,7 @@ import os
 import joblib
 import pandas as pd
 
-from partrisk import data_reader
+from partrisk.data import reader as data_reader
 from partrisk.features import failure as feature_builder
 
 from src import install_context, lifecycle_builder, previous_cycle

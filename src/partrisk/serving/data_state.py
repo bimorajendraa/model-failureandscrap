@@ -21,7 +21,7 @@ import time
 
 import pandas as pd
 
-from partrisk import data_reader
+from partrisk.data import reader as data_reader
 from partrisk import predict as failure_model
 from partrisk.serving import settings
 

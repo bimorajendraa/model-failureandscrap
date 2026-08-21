@@ -19,7 +19,7 @@ import pytest
 
 def _database_available() -> bool:
     try:
-        from partrisk import data_reader
+        from partrisk.data import reader as data_reader
 
         with data_reader.connect() as conn:
             with conn.cursor() as cur:
@@ -109,7 +109,7 @@ def not_scorable_item(batch) -> str:
     Dicari dari data, bukan ditulis tetap: ID yang hari ini tidak terpasang
     bisa saja terpasang lagi besok.
     """
-    from partrisk import data_reader
+    from partrisk.data import reader as data_reader
 
     active = set(batch.frame["item_id"])
     events = data_reader.get_events()

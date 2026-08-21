@@ -18,7 +18,7 @@ import functools
 import threading
 from contextlib import contextmanager
 
-from partrisk import data_reader
+from partrisk.data import reader as data_reader
 
 # Fungsi baca yang argumennya menentukan hasil sepenuhnya, jadi aman diulang.
 _CACHEABLE = ("get_dataset_max_event_on", "get_events", "get_cycles")

@@ -29,7 +29,8 @@ import sys
 
 import joblib
 
-from partrisk import config, data_reader, death_risk, scrap_features
+from partrisk import config, death_risk, scrap_features
+from partrisk.data import reader as data_reader
 from partrisk import predict as failure_model
 
 _LOADED: tuple[object, object, dict] | None = None

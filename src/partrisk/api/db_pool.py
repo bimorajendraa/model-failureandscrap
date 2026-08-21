@@ -20,7 +20,8 @@ import threading
 
 import psycopg_pool
 
-from partrisk import config, data_reader
+from partrisk import config
+from partrisk.data import reader as data_reader
 
 logger = logging.getLogger(__name__)
 

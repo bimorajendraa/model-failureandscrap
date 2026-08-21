@@ -24,7 +24,7 @@ sys.path.insert(0, str(EVENT_BASED_DIR))  # lihat catatan build_dataset.py/train
 import numpy as np
 import pandas as pd
 
-from partrisk import data_reader
+from partrisk.data import reader as data_reader
 
 from src import categorical_support, evaluation, model_fit
 

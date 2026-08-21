@@ -25,7 +25,7 @@ if str(SURVIVAL_DIR) not in sys.path:
 import joblib
 import pandas as pd
 
-from partrisk import data_reader
+from partrisk.data import reader as data_reader
 
 from src import features, utils
 

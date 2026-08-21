@@ -17,7 +17,8 @@ from __future__ import annotations
 import pandas as pd
 import psycopg
 
-from partrisk import config, data_reader, death_risk
+from partrisk import config, death_risk
+from partrisk.data import reader as data_reader
 from partrisk.features import failure as feature_builder
 from partrisk import predict as failure_model
 from partrisk import predict_scrap as scrap_model

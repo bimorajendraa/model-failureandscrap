@@ -29,7 +29,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from partrisk import data_reader
+from partrisk.data import reader as data_reader
 from partrisk.features import failure as feature_builder
 
 from src import features, install_context, lifecycle_builder, utils

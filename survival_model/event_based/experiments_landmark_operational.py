@@ -52,7 +52,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from partrisk import config, data_reader, training_utils
+from partrisk import config, training_utils
+from partrisk.data import reader as data_reader
 from partrisk.features import failure as feature_builder
 from partrisk import predict as root_predict
 

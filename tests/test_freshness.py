@@ -10,7 +10,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from partrisk import data_reader
+from partrisk.data import reader as data_reader
 from partrisk import predict as failure_model
 from partrisk.serving import data_state, predictor, query_cache
 from tests.conftest import needs_database, needs_models

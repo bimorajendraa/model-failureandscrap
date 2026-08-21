@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from partrisk import data_reader
+from partrisk.data import reader as data_reader
 from partrisk.api import db_pool
 from partrisk.api.schemas import HealthResponse
 from partrisk.serving import batch_predictor, model_loader

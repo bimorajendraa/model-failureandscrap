@@ -46,7 +46,7 @@ def main() -> int:
     print(f"      TOTAL: {total_bytes / 1e6:.3f} MB")
 
     print("\n[3/4] Single predict() p50 (20 PART aktif)...")
-    from partrisk import data_reader
+    from partrisk.data import reader as data_reader
 
     cycles = data_reader.get_cycles()
     active = cycles.loc[

@@ -16,7 +16,7 @@ Rantai yang dibangun ulang (mengikuti logic research yang sudah terbukti):
                             ->  installation cycle (satu baris per pemasangan)
 
 Tanggung jawab modul ini berhenti di situ: MEMBACA. Pembentukan observasi,
-agregat riwayat, dan fitur dikerjakan feature_builder.py.
+agregat riwayat, dan fitur dikerjakan package `partrisk.features`.
 
 Yang SENGAJA tidak dibawa dari research: seluruh kolom yang tidak dipakai 18
 fitur final (relocation/preventive/repair-process counts, window yang tidak
