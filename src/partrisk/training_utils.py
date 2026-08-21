@@ -114,3 +114,28 @@ def decide_promotion(
     if force:
         return True, f"{reason} - dipaksa lewat --force-promote", comparison
     return False, reason, comparison
+
+
+def print_promotion_comparison(
+    candidate_metrics: dict, incumbent_metrics: dict | None, previous_version: str | None,
+    window_days: float, unit_label: str,
+) -> None:
+    """Cetak tabel kandidat vs incumbent pada window uji yang sama - dipakai
+    train.py dan train_scrap.py (dulu dua salinan identik, Fase B4 dedup).
+    Tidak mencetak apa pun kalau belum ada incumbent (retrain pertama)."""
+    if incumbent_metrics is None:
+        return
+    print(
+        f"\n      Perbandingan pada window uji yang sama ({window_days:.0f} hari, "
+        f"kapasitas setara {candidate_metrics['capacity_evaluated']} {unit_label}):"
+    )
+    print(
+        f"      {'':10s} {'PR-AUC':>8s} {'ROC-AUC':>8s} {'Recall@cap':>11s} "
+        f"{'Precision@cap':>14s} {'Brier':>8s}"
+    )
+    for label, values in (("kandidat", candidate_metrics), (previous_version, incumbent_metrics)):
+        print(
+            f"      {label:10s} {values['pr_auc']:>8.4f} {values['roc_auc']:>8.4f} "
+            f"{values['recall_at_capacity']:>11.4f} {values['precision_at_capacity']:>14.4f} "
+            f"{values['brier_calibrated']:>8.4f}"
+        )

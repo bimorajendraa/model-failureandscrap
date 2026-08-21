@@ -360,21 +360,9 @@ def main() -> int:
           f"balanced={metrics['balanced_accuracy']:.1%}  "
           f"presisi={metrics['precision']:.1%}  recall={metrics['recall']:.1%}")
 
-    if incumbent_metrics is not None:
-        print(
-            f"\n      Perbandingan pada window uji yang sama ({window_days:.0f} hari, "
-            f"kapasitas setara {candidate_metrics['capacity_evaluated']} kerusakan):"
-        )
-        print(
-            f"      {'':10s} {'PR-AUC':>8s} {'ROC-AUC':>8s} {'Recall@cap':>11s} "
-            f"{'Precision@cap':>14s} {'Brier':>8s}"
-        )
-        for label, values in (("kandidat", candidate_metrics), (previous, incumbent_metrics)):
-            print(
-                f"      {label:10s} {values['pr_auc']:>8.4f} {values['roc_auc']:>8.4f} "
-                f"{values['recall_at_capacity']:>11.4f} {values['precision_at_capacity']:>14.4f} "
-                f"{values['brier_calibrated']:>8.4f}"
-            )
+    training_utils.print_promotion_comparison(
+        candidate_metrics, incumbent_metrics, previous, window_days, unit_label="kerusakan"
+    )
 
     if promote:
         CURRENT_POINTER.write_text(version, encoding="utf-8")
