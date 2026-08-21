@@ -1,5 +1,5 @@
 {
-  "training_date": "2026-08-21T14:22:15.670130+00:00",
+  "training_date": "2026-08-21T14:42:48.196261+00:00",
   "data_end": "2026-08-03 11:07:22",
   "primary_model": "random_survival_forest",
   "unit_of_observation": "one row per (lifecycle, landmark) - features/age RE-ANCHORED at each landmark's observation_on (install / organic operational event / sparse 90-365d anchor), NOT frozen at installed_on like a baseline-installation model",
@@ -182,70 +182,82 @@
   },
   "hyperparameters": {
     "random_survival_forest": {
-      "n_estimators": 100,
-      "min_samples_split": 40,
-      "min_samples_leaf": 30,
+      "n_estimators": 50,
+      "min_samples_split": 140,
+      "min_samples_leaf": 100,
       "max_features": "sqrt",
-      "n_jobs": -1,
+      "n_jobs": 1,
       "random_state": 42
     },
+    "random_survival_forest_target_coarsening": "daily resolution <=120 days, 60-day steps beyond - fit() target only, NOT applied to evaluation (native_metrics uses original duration_days)",
     "cox_ph": {
       "alpha": 0.1,
       "ties": "efron"
     }
+  },
+  "calibration": {
+    "method": "isotonic per horizon, VALIDATION landmark rows, definite binary label (event<=horizon=1, survived-to-horizon=0, censored-before-horizon excluded)",
+    "horizons_days": [
+      30,
+      60,
+      90,
+      120
+    ],
+    "cummax_required": true,
+    "applied_to_advisory_fields": false
   },
   "evaluation_metrics_full_landmark_rows": {
     "random_survival_forest": {
       "validation": {
         "rows": 5540,
         "events": 534,
-        "c_index": 0.8290270977967045,
+        "c_index": 0.8416741854906196,
         "max_followup_days": 363.0,
-        "uno_c_index": 0.8291389920795252,
+        "uno_c_index": 0.8416943866253715,
         "horizons_evaluable_days": [
           30,
           60,
           90,
           120
         ],
-        "integrated_brier_score": 0.04746517713658578,
+        "integrated_brier_score": 0.04823316103796496,
         "brier_at_horizon": {
-          "30": 0.035696829938949154,
-          "60": 0.046002440963979443,
-          "90": 0.051599256507667474,
-          "120": 0.05389083793727165
+          "30": 0.03569156423597563,
+          "60": 0.04676259964183745,
+          "90": 0.052794367013118966,
+          "120": 0.05459346868190132
         },
         "time_dependent_auc_at_horizon": {
-          "30": 0.8356710898315958,
-          "60": 0.8236711754772281,
-          "90": 0.8308765256866597,
-          "120": 0.8423632919272904
+          "30": 0.8508501643547206,
+          "60": 0.8394456086001507,
+          "90": 0.8452818727996436,
+          "120": 0.8562278869310804
         }
       },
       "test": {
         "rows": 4890,
         "events": 412,
-        "c_index": 0.8477123048146447,
+        "c_index": 0.8624679663441186,
         "max_followup_days": 214.0,
-        "uno_c_index": 0.8475588562649572,
+        "uno_c_index": 0.8622552143446129,
         "horizons_evaluable_days": [
           30,
           60,
           90,
           120
         ],
-        "integrated_brier_score": 0.05088881845427292,
+        "integrated_brier_score": 0.051707083123156986,
         "brier_at_horizon": {
-          "30": 0.04873254888908878,
-          "60": 0.05094329109745244,
-          "90": 0.051879914706527974,
-          "120": 0.050953950228587945
+          "30": 0.049562132150406196,
+          "60": 0.05193915464353418,
+          "90": 0.052919771750886024,
+          "120": 0.050962513799695346
         },
         "time_dependent_auc_at_horizon": {
-          "30": 0.8817974213731148,
-          "60": 0.9002395213576111,
-          "90": 0.8704679799148525,
-          "120": 0.8967243122588178
+          "30": 0.8949410345190237,
+          "60": 0.9127085916047312,
+          "90": 0.8827797286728116,
+          "120": 0.9054912245351635
         }
       }
     },
@@ -253,53 +265,53 @@
       "validation": {
         "rows": 5540,
         "events": 534,
-        "c_index": 0.7914515789978517,
+        "c_index": 0.7918262876014033,
         "max_followup_days": 363.0,
-        "uno_c_index": 0.7919477286483133,
+        "uno_c_index": 0.792309543353953,
         "horizons_evaluable_days": [
           30,
           60,
           90,
           120
         ],
-        "integrated_brier_score": 0.05362900428460551,
+        "integrated_brier_score": 0.05358813650154043,
         "brier_at_horizon": {
-          "30": 0.03869459799576158,
-          "60": 0.052431829410834026,
-          "90": 0.058538903077725586,
-          "120": 0.06113796273475223
+          "30": 0.038647552372242364,
+          "60": 0.05237800560216183,
+          "90": 0.05847799481051372,
+          "120": 0.0611692658116491
         },
         "time_dependent_auc_at_horizon": {
-          "30": 0.791714174650222,
-          "60": 0.7892897337082826,
-          "90": 0.801984858068394,
-          "120": 0.8193232964341306
+          "30": 0.7924768768331821,
+          "60": 0.7898224499289419,
+          "90": 0.8024220910253779,
+          "120": 0.8196333335768806
         }
       },
       "test": {
         "rows": 4890,
         "events": 412,
-        "c_index": 0.7618011320445733,
+        "c_index": 0.7609071222874106,
         "max_followup_days": 214.0,
-        "uno_c_index": 0.7619968459424893,
+        "uno_c_index": 0.7611108095152808,
         "horizons_evaluable_days": [
           30,
           60,
           90,
           120
         ],
-        "integrated_brier_score": 0.06501409221599042,
+        "integrated_brier_score": 0.0647527807946692,
         "brier_at_horizon": {
-          "30": 0.059884057599783574,
-          "60": 0.06511465444502026,
-          "90": 0.06660316627890102,
-          "120": 0.06676485424831634
+          "30": 0.05974856879384499,
+          "60": 0.06498255093019031,
+          "90": 0.06648291462188553,
+          "120": 0.06583718487001856
         },
         "time_dependent_auc_at_horizon": {
-          "30": 0.7869927404047721,
-          "60": 0.8079887718472595,
-          "90": 0.7939969361471442,
-          "120": 0.8266000428853894
+          "30": 0.7858150377127002,
+          "60": 0.806761075273723,
+          "90": 0.7925277991607261,
+          "120": 0.8248200447748993
         }
       }
     }

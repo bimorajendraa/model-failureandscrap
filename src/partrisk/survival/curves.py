@@ -74,11 +74,24 @@ def step_eval_matrix(times: np.ndarray, curves: np.ndarray, query_times: list[fl
     return result
 
 
-def median_survival_time(times: np.ndarray, curve: np.ndarray) -> float | None:
-    """Umur saat S(t) pertama kali <= 0.5, atau None kalau kurva belum turun
-    sampai separuh dalam rentang follow-up training (tidak diekstrapolasi -
-    lebih baik tidak menjawab daripada menjawab dengan menebak)."""
-    below = np.where(curve <= 0.5)[0]
+def survival_time_at_threshold(times: np.ndarray, curve: np.ndarray, threshold: float) -> float | None:
+    """Umur saat S(t) pertama kali <= threshold, atau None kalau kurva belum
+    turun sampai situ dalam rentang follow-up training (tidak diekstrapolasi -
+    lebih baik tidak menjawab daripada menjawab dengan menebak).
+
+    Ambang tinggi (mis. 0,9) tercapai jauh lebih sering daripada ambang
+    rendah (mis. 0,5 - "median") - lihat `days_until_survival_90pct` di
+    predict/survival.py: kebanyakan PART aktif belum cukup lama untuk S(t)
+    turun sampai separuh, jadi median_days_to_failure sering None. Ambang
+    90% adalah field yang JAUH lebih sering terisi dan tetap actionable
+    ("berapa hari lagi sampai risikonya mulai naik", bukan "kapan separuh
+    populasi ini gagal")."""
+    below = np.where(curve <= threshold)[0]
     if len(below) == 0:
         return None
     return float(times[int(below[0])])
+
+
+def median_survival_time(times: np.ndarray, curve: np.ndarray) -> float | None:
+    """Umur saat S(t) pertama kali <= 0.5 - lihat `survival_time_at_threshold()`."""
+    return survival_time_at_threshold(times, curve, 0.5)
