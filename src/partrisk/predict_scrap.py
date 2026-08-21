@@ -58,14 +58,6 @@ def _load_model() -> tuple[object, object, dict]:
     return _LOADED
 
 
-def _risk_level(probability: float, cutoffs: dict[str, float]) -> str:
-    if probability >= cutoffs["high"]:
-        return "HIGH"
-    if probability >= cutoffs["medium"]:
-        return "MEDIUM"
-    return "LOW"
-
-
 def predict_scrap(item_id: str) -> dict:
     """Kalau PART ini rusak, seberapa besar kemungkinan tidak bisa diperbaiki.
 
@@ -97,7 +89,7 @@ def predict_scrap(item_id: str) -> dict:
         # sehingga angka ini cenderung MERENDAHKAN risiko sesungguhnya.
         # Urutannya tetap yang paling bisa dipercaya.
         "scrap_probability": round(probability, 4),
-        "scrap_risk_level": _risk_level(probability, metadata["risk_cutoffs"]),
+        "scrap_risk_level": failure_model._risk_level(probability, metadata["risk_cutoffs"]),
         "scrap_risk_basis": (
             "dibandingkan kerusakan lain yang masuk bengkel, bukan terhadap "
             "seluruh PART aktif"
@@ -149,7 +141,10 @@ def predict_death_risk(item_id: str) -> dict:
 
 # Nama publik untuk pemanggil di luar modul ini (inference/, batch scoring).
 load_model = _load_model
-risk_level = _risk_level
+# _risk_level TIDAK diduplikasi di sini - sama persis dengan predict.py
+# (probability + cutoffs -> HIGH/MEDIUM/LOW), jadi dipakai langsung dari
+# module yang sudah diimpor di atas (Fase B4, dedup).
+risk_level = failure_model._risk_level
 
 
 if __name__ == "__main__":
