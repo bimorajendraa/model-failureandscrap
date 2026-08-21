@@ -23,6 +23,7 @@ from partrisk.features import failure as feature_builder
 from partrisk.predict import failure as failure_model
 from partrisk.predict import risk as death_risk
 from partrisk.predict import scrap as scrap_model
+from partrisk.predict import survival as predict_survival
 from partrisk.serving import batch_predictor, data_state, explanation, history, query_cache, recommendation
 from partrisk.serving.errors import DataSourceUnavailable, PartNotFound, PartNotScorable
 
@@ -90,6 +91,51 @@ def predict_scrap(item_id: str) -> dict:
             raise _translate(item_id, error) from error
 
 
+def _survival_advisory_fields(item_id: str) -> dict:
+    """Field ADVISORY (median_days_to_failure, days_until_survival_90pct,
+    survival_curve, ...) dari model survival event-based - mode aditif,
+    TIDAK PERNAH menggagalkan assessment utama (CatBoost tetap sumber
+    failure_probability_*/risk_level). Kegagalan APA PUN di sini (model
+    belum dilatih, PART tidak scorable model survival meski scorable
+    CatBoost, dll) menghasilkan field kosong dengan alasan, bukan exception
+    yang menjalar ke get_part_assessment()."""
+    try:
+        result = predict_survival.predict(item_id)
+    except predict_survival.ItemNotScorable as error:
+        return {
+            "median_days_to_failure": None,
+            "median_days_to_failure_basis": f"model survival: {error}",
+            "days_until_survival_90pct": None,
+            "survival_curve": None,
+            "curve_step_days": None,
+            "curve_horizon_days": None,
+            "curve_is_calibrated": False,
+        }
+    except (Exception, SystemExit) as error:  # noqa: BLE001 - lihat docstring: advisory, tidak boleh menjalar
+        return {
+            "median_days_to_failure": None,
+            "median_days_to_failure_basis": f"model survival tidak tersedia ({error})",
+            "days_until_survival_90pct": None,
+            "survival_curve": None,
+            "curve_step_days": None,
+            "curve_horizon_days": None,
+            "curve_is_calibrated": False,
+        }
+    curve = result["estimated_survival_curve_from_now"]
+    return {
+        "median_days_to_failure": result["median_days_remaining_from_now"],
+        "median_days_to_failure_basis": (
+            None if result["median_days_remaining_from_now"] is not None
+            else "S(t) belum turun sampai separuh dalam rentang follow-up training - tidak diekstrapolasi"
+        ),
+        "days_until_survival_90pct": result["days_until_survival_90pct_from_now"],
+        "survival_curve": curve,
+        "curve_step_days": predict_survival.CURVE_STEP_DAYS,
+        "curve_horizon_days": curve[-1]["days_from_now"] if curve else None,
+        "curve_is_calibrated": False,
+    }
+
+
 def get_part_assessment(item_id: str, include_explanation: bool = True) -> dict:
     """Gabungan kedua model + rekomendasi tindakan untuk satu PART.
 
@@ -105,6 +151,7 @@ def get_part_assessment(item_id: str, include_explanation: bool = True) -> dict:
     with query_cache.request_scope():
         data_state.current_data_end()
         failure = predict_failure(item_id)
+        failure.update(_survival_advisory_fields(item_id))
 
         try:
             scrap = predict_scrap(item_id)

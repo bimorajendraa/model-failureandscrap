@@ -82,12 +82,27 @@ def test_batas_data_tidak_ditanyakan_ulang_setiap_saat(count_connections):
 def test_assessment_tidak_membaca_hal_yang_sama_berulang(
     count_connections, scorable_item
 ):
-    """predict() dan predict_scrap() membaca batas data, siklus, dan event yang
-    sama persis. Tanpa penyatuan, satu assessment membuka 9 koneksi."""
+    """predict.failure/predict.scrap/predict.survival (advisory, mode aditif)
+    membaca batas data, siklus, dan event PART yang sama persis - itu WAJIB
+    tersatukan lewat query_cache (6 pembacaan BERBEDA minimal: batas data,
+    siklus+event PART ini, siklus SELURUH armada + episode + terminal context
+    khusus dipakai model survival). Tanpa penyatuan, satu assessment membuka
+    belasan koneksi.
+
+    Ambang 6 (bukan 4 seperti dulu, sebelum model survival ikut dipanggil)
+    ditemukan lewat bug nyata: predict/survival.py memanggil
+    get_cycles/get_events dengan KEYWORD (item_id=..., dataset_max_event_on=...)
+    sementara predict/failure.py & predict/scrap.py memanggilnya POSITIONAL -
+    query_cache.py mencocokkan cache key persis dari (args, kwargs), jadi
+    kedua gaya pemanggilan untuk PART yang SAMA dianggap kunci BERBEDA dan
+    cache diam-diam tidak nyambung. Diperbaiki dengan menyeragamkan gaya
+    pemanggilan (lihat predict/survival.py), BUKAN menaikkan ambang test
+    begitu saja - kalau angka ini naik lagi tanpa alasan bertambahnya
+    kebutuhan data yang genuinely baru, curigai bug yang sama."""
     data_state.reset()
     count_connections["n"] = 0
     predictor.get_part_assessment(scorable_item, include_explanation=True)
-    assert count_connections["n"] <= 4, (
+    assert count_connections["n"] <= 6, (
         f"{count_connections['n']} koneksi untuk satu assessment - "
         "pembacaan berulang tidak tersatukan"
     )

@@ -32,11 +32,29 @@ class HealthResponse(BaseModel):
     batch_cache: dict
 
 
+class SurvivalPoint(BaseModel):
+    """Satu titik kurva S(t) model survival - lihat `survival_curve` di
+    `FailurePrediction`."""
+
+    model_config = _CONFIG
+
+    days_from_now: int
+    survival_probability: float = Field(ge=0.0, le=1.0)
+
+
 class FailurePrediction(BaseModel):
-    """Keluaran predict.predict() apa adanya.
+    """Keluaran predict.predict() apa adanya, DITAMBAH field advisory dari
+    model survival event-based (mode aditif - lihat gate_decision.md,
+    `partrisk.predict.survival`, model TERPISAH, TIDAK menentukan
+    failure_probability_*/risk_level di atas).
 
     Angkanya adalah PELUANG kerusakan dalam N hari ke depan. Model tidak
-    memperkirakan tanggal kerusakan.
+    memperkirakan tanggal kerusakan pasti - field advisory di bawah
+    (median_days_to_failure dkk) menjawab pertanyaan "kapan" yang secara
+    struktural tidak bisa dijawab model klasifikasi 30-hari di atas, tapi
+    SERING None (lihat median_days_to_failure_basis) - kurva survival butuh
+    waktu lama untuk turun sampai separuh, dan mayoritas PART aktif belum
+    setua itu.
     """
 
     model_config = _CONFIG
@@ -49,6 +67,15 @@ class FailurePrediction(BaseModel):
     risk_level: RiskLevel
     model_version: str
     as_of: str
+    # --- Advisory, dari model survival TERPISAH (partrisk.predict.survival) -
+    # tidak pernah ikut menentukan failure_probability_*/risk_level di atas.
+    median_days_to_failure: float | None = None
+    median_days_to_failure_basis: str | None = None
+    days_until_survival_90pct: float | None = None
+    survival_curve: list[SurvivalPoint] | None = None
+    curve_step_days: int | None = None
+    curve_horizon_days: int | None = None
+    curve_is_calibrated: bool = False
 
 
 class ScrapPrediction(BaseModel):
@@ -159,6 +186,11 @@ class PriorityItem(BaseModel):
     recommended_action: str
     recommendation_message: str
     replacement_candidate: bool
+    # Advisory (model survival TERPISAH, mode aditif - lihat FailurePrediction).
+    # Kurva PENUH sengaja TIDAK di sini - lihat serving/batch_predictor.py
+    # docstring _score_survival_advisory() soal ukuran payload daftar.
+    median_days_to_failure: float | None = None
+    days_until_survival_90pct: float | None = None
 
 
 class ScoredAt(BaseModel):

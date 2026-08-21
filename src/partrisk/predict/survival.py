@@ -15,20 +15,24 @@ Konsekuensi bagus di sisi matematika: kurva `S(t)` model ini SUDAH dari
 perlu rumus `1-S(age+N)/S(age)` seperti model baseline-instalasi (yang
 perlu itu KARENA kurvanya dari t=0=install).
 
-BELUM dipakai jalur serving (mode aditif - lihat gate_decision.md, model ini
-TIDAK menggantikan CatBoost sebagai mesin keputusan, cuma sumber field
-advisory median_days_to_failure/survival_curve kalau/ketika itu diaktifkan).
-ARTIFACTS_DIR SEMENTARA masih menunjuk artifact riset (survival_model/event_based/artifacts/,
-5,26 GB, BUKAN kandidat compact A2) - pindah ke models/failure/v3/ resmi
-begitu training.failure_survival + artifacts.families selesai dibangun.
+Mode ADITIF (lihat gate_decision.md) - model ini TIDAK menggantikan CatBoost
+sebagai mesin keputusan, cuma sumber field advisory
+(`median_days_to_failure` di batch, plus kurva penuh di endpoint satu PART -
+lihat `score_batch()`/`predict()`). ARTIFACTS_DIR menunjuk artifact hasil
+`training.failure_survival` (kandidat compact A2, ~66 MB) di
+survival_model/event_based/artifacts/ - BUKAN models/failure/v3/, karena
+tidak ada mekanisme cutover/rollback yang perlu dibangun untuk field
+advisory saja.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import sys
 
 import joblib
+import numpy as np
 import pandas as pd
 
 from partrisk import config
@@ -37,34 +41,49 @@ from partrisk.features import failure as feature_builder
 from partrisk.features.survival import builder as features
 from partrisk.features.survival import install_context, previous_cycle
 from partrisk.survival import curves
+from partrisk.training import landmark_eval
 
 ARTIFACTS_DIR = config.PACKAGE_DIR / "survival_model" / "event_based" / "artifacts"
 HORIZONS_DAYS = [30, 60, 90, 120]
 CURVE_STEP_DAYS = 30
 CURVE_MAX_DAYS = 1080
+BATCH_CHUNK_SIZE = 2000
 
 
 class ItemNotScorable(Exception):
     pass
 
 
-def _load_primary_model():
+def load_model() -> tuple:
+    """Model utama (RSF) + encoder + metadata mentah - dipakai `score_batch()`
+    (serving/batch_predictor.py) dan `_load_primary_model()` di bawah (CLI
+    satu PART). Melempar FileNotFoundError (BUKAN SystemExit) supaya
+    pemanggil library (batch_predictor) bisa menangkapnya dan melewati field
+    advisory dengan aman kalau model belum pernah dilatih - CLI satu PART
+    (`main()`) yang menampilkan pesan SystemExit ke pengguna."""
     if not (ARTIFACTS_DIR / "models.joblib").exists():
-        raise SystemExit(
-            f"Model event-based belum dilatih. Jalankan dulu: "
-            f"python -m partrisk.training.datasets.survival (artifacts belum ada di {ARTIFACTS_DIR})"
-        )
+        raise FileNotFoundError(f"Artifacts belum ada di {ARTIFACTS_DIR}")
     models = joblib.load(ARTIFACTS_DIR / "models.joblib")
     metadata = json.loads((ARTIFACTS_DIR / "metadata.json").read_text(encoding="utf-8"))
-    primary_name = metadata["primary_model"]
-    model = models[primary_name]
+    model = models[metadata["primary_model"]]
     if hasattr(model, "n_jobs"):
         model.n_jobs = 1  # lihat catatan scripts/evaluate_survival.py load_artifacts()
     encoder = joblib.load(ARTIFACTS_DIR / "encoder.joblib")
+    return model, encoder, metadata
+
+
+def _load_primary_model():
+    try:
+        model, encoder, metadata = load_model()
+    except FileNotFoundError as exc:
+        raise SystemExit(
+            f"Model event-based belum dilatih. Jalankan dulu: "
+            f"python -m partrisk.training.failure_survival ({exc})"
+        ) from exc
     support_totals = {k: int(v) for k, v in metadata["support_totals"].items()}
     item_type_support_totals = {k: int(v) for k, v in metadata["item_type_support_totals"].items()}
     terminal_support_totals = {k: int(v) for k, v in metadata["terminal_support_totals"].items()}
-    return model, primary_name, encoder, support_totals, item_type_support_totals, terminal_support_totals
+    return model, metadata["primary_model"], encoder, support_totals, item_type_support_totals, terminal_support_totals
 
 
 def predict(item_id: str) -> dict:
@@ -73,7 +92,12 @@ def predict(item_id: str) -> dict:
     )
 
     dataset_max_event_on = data_reader.get_dataset_max_event_on()
-    cycles_for_item = data_reader.get_cycles(item_id=item_id, dataset_max_event_on=dataset_max_event_on)
+    # Positional (bukan keyword) SENGAJA - query_cache.py mencocokkan cache
+    # key persis dari (args, kwargs), predict/failure.py dan predict/scrap.py
+    # sudah memanggil get_cycles/get_events positional untuk PART yang sama;
+    # kalau di sini pakai keyword, kuncinya beda dan cache tidak nyambung -
+    # satu assessment diam-diam kembali baca database berulang kali.
+    cycles_for_item = data_reader.get_cycles(item_id, dataset_max_event_on)
     active = cycles_for_item.loc[cycles_for_item["cycle_end_reason"].eq("RIGHT_CENSORED_AT_DATA_END")]
     if active.empty:
         raise ItemNotScorable(f"{item_id}: tidak ada siklus yang sedang aktif (PART tidak terpasang sekarang).")
@@ -84,7 +108,7 @@ def predict(item_id: str) -> dict:
     installed_on = pd.Timestamp(active_cycle.loc[0, "installed_on"])
     age_days = float((dataset_max_event_on - installed_on).total_seconds() / 86400.0)
 
-    events = data_reader.get_events(item_id=item_id)
+    events = data_reader.get_events(item_id)
     all_cycles = data_reader.get_cycles()
     episodes = data_reader.get_failure_episodes()
 
@@ -97,7 +121,7 @@ def predict(item_id: str) -> dict:
     observations["days_since_installation"] = age_days
     observations["landmark_age_days"] = age_days  # attach_dynamic_extra() butuh nama kolom ini (lihat landmarks.py)
     observations = install_context.attach_install_context(observations, events)
-    terminal_raw = data_reader.get_terminal_context(item_id=item_id)
+    terminal_raw = data_reader.get_terminal_context(item_id)
     observations = features.attach_terminal_extra(observations, terminal_raw)
     observations = feature_builder.attach_history(observations, events)
     observations = feature_builder.attach_fleet(observations, all_cycles, episodes)
@@ -137,6 +161,11 @@ def predict(item_id: str) -> dict:
             for h in HORIZONS_DAYS
         }
     median_days_remaining = curves.median_survival_time(times_grid, curve)
+    # median SERING None (kebanyakan PART aktif belum cukup lama untuk S(t)
+    # turun sampai separuh dalam rentang follow-up training - diukur lewat
+    # score_batch(): 5,3% dari populasi aktif) - ambang 90% jauh lebih sering
+    # tercapai dan tetap actionable, lihat survival.curves docstring.
+    days_until_90pct_remaining = curves.survival_time_at_threshold(times_grid, curve, 0.9)
 
     curve_days = list(range(0, int(min(times_grid.max(), CURVE_MAX_DAYS)) + 1, CURVE_STEP_DAYS))
     curve_points = [
@@ -156,6 +185,9 @@ def predict(item_id: str) -> dict:
         "median_days_remaining_from_now": (
             round(median_days_remaining, 1) if median_days_remaining is not None else None
         ),
+        "days_until_survival_90pct_from_now": (
+            round(days_until_90pct_remaining, 1) if days_until_90pct_remaining is not None else None
+        ),
         "estimated_survival_curve_from_now": curve_points,
         "model_name": model_name,
         "note": (
@@ -164,6 +196,53 @@ def predict(item_id: str) -> dict:
             "beku di installed_on. risk_Nd = P(gagal dalam N hari ke depan | kondisi sekarang)."
         ),
     }
+
+
+def score_batch(
+    rows: pd.DataFrame, events: pd.DataFrame, cycles: pd.DataFrame, episodes: pd.DataFrame,
+    terminal_raw: pd.DataFrame, model, encoder, metadata: dict,
+) -> pd.DataFrame:
+    """`median_days_to_failure` untuk BANYAK PART aktif sekaligus - field
+    advisory dipakai `serving/batch_predictor.py` (mode aditif, TIDAK
+    menentukan risk_level/urutan). `rows` = potret PART aktif
+    (`feature_builder.current_observations(cycles)`, kolom sama dengan yang
+    dipakai model classification) - fitur event-based dibangun PADA
+    observation_on tiap baris lewat `training.landmark_eval` (mekanisme SAMA
+    dengan `predict()` di atas, cuma divektorkan).
+
+    `days_until_survival_90pct` (umur saat S(t) turun sampai 90%, bukan 50%)
+    disertakan berdampingan - median sering None (kebanyakan PART aktif
+    belum cukup lama untuk S(t) turun sampai separuh dalam rentang follow-up
+    training), ambang 90% jauh lebih sering tercapai dan tetap actionable
+    (lihat docstring `survival.curves.survival_time_at_threshold`).
+
+    Kurva penuh SENGAJA tidak disertakan di sini (payload batch akan melipat
+    puluhan kali untuk field yang jarang dibutuhkan di daftar prioritas -
+    kurva penuh tetap eksklusif endpoint satu PART lewat `predict()`)."""
+    feature_frame = landmark_eval.build_landmark_features_at_observation(
+        rows, events, cycles, episodes, terminal_raw, metadata
+    )
+    n = len(feature_frame)
+    median_days = np.full(n, np.nan)
+    days_until_90pct = np.full(n, np.nan)
+    n_chunks = math.ceil(n / BATCH_CHUNK_SIZE)
+    for i in range(n_chunks):
+        lo, hi = i * BATCH_CHUNK_SIZE, min((i + 1) * BATCH_CHUNK_SIZE, n)
+        chunk = feature_frame.iloc[lo:hi]
+        x_chunk = features.encode(chunk, encoder)
+        times_grid, curve_values = curves.survival_curve_arrays(model, x_chunk)
+        for k in range(curve_values.shape[0]):
+            median = curves.median_survival_time(times_grid, curve_values[k])
+            median_days[lo + k] = np.nan if median is None else median
+            at_90pct = curves.survival_time_at_threshold(times_grid, curve_values[k], 0.9)
+            days_until_90pct[lo + k] = np.nan if at_90pct is None else at_90pct
+        del curve_values
+
+    return pd.DataFrame({
+        "item_id": rows["item_identifier_clean"].to_numpy(),
+        "median_days_to_failure": median_days,
+        "days_until_survival_90pct": days_until_90pct,
+    })
 
 
 def main() -> int:

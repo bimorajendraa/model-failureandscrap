@@ -1,10 +1,12 @@
 """Menyatukan pembacaan data_reader yang berulang di dalam SATU request.
 
-`predict()` dan `predict_scrap()` masing-masing berdiri sendiri (sengaja,
-supaya kedua model tetap independen), tapi keduanya membaca
-get_dataset_max_event_on/get_cycles/get_events dengan argumen yang sama.
-Tanpa penyatuan ini, satu endpoint assessment memakai 9 koneksi database;
-dengan ini, 3.
+`predict()`, `predict_scrap()`, dan `predict_survival` (advisory, mode
+aditif) masing-masing berdiri sendiri (sengaja, supaya ketiga model tetap
+independen), tapi ketiganya membaca get_dataset_max_event_on/get_cycles/
+get_events dengan argumen yang sama, dan predict_survival tambah butuh
+get_failure_episodes/get_terminal_context. Tanpa penyatuan ini, satu
+endpoint assessment memakai belasan koneksi database; dengan ini, jauh lebih
+sedikit.
 
 Cache hanya hidup selama `request_scope()` dan hanya untuk thread itu - di
 luar scope, data_reader dipanggil apa adanya, jadi predict.py/train.py dari
@@ -21,7 +23,10 @@ from contextlib import contextmanager
 from partrisk.data import reader as data_reader
 
 # Fungsi baca yang argumennya menentukan hasil sepenuhnya, jadi aman diulang.
-_CACHEABLE = ("get_dataset_max_event_on", "get_events", "get_cycles")
+_CACHEABLE = (
+    "get_dataset_max_event_on", "get_events", "get_cycles",
+    "get_failure_episodes", "get_terminal_context",
+)
 
 _local = threading.local()
 _installed = False

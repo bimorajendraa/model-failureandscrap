@@ -23,6 +23,7 @@ from partrisk import config, scrap_features
 from partrisk.data import reader as data_reader
 from partrisk.predict import failure as failure_model
 from partrisk.predict import scrap as scrap_model
+from partrisk.predict import survival as predict_survival
 from partrisk.serving import batch_predictor
 from tests.conftest import needs_database, needs_models
 
@@ -65,6 +66,32 @@ def test_probabilitas_scrap_batch_sama_dengan_single(sample):
         assert single["scrap_probability"] == row["scrap_probability"]
         assert single["scrap_risk_level"] == row["scrap_risk_level"]
         assert single["item_type"] == row["item_type"]
+
+
+def test_median_days_to_failure_batch_sama_dengan_single(sample):
+    """Field advisory model survival (mode aditif, gate_decision.md) - batch
+    (score_batch(), divektorkan) harus setuju dengan single (predict(),
+    per-PART) untuk PART yang sama, sama seperti pasangan CatBoost di atas.
+    Skip diam-diam kalau model survival belum pernah dilatih di mesin ini -
+    field advisory ini tidak wajib ada (lihat _survival_advisory_fields())."""
+    try:
+        predict_survival.load_model()
+    except FileNotFoundError:
+        pytest.skip("model survival belum dilatih (survival_model/event_based/artifacts/)")
+
+    for _, row in sample.iterrows():
+        single = predict_survival.predict(row["item_id"])
+        for batch_column, single_key in (
+            ("median_days_to_failure", "median_days_remaining_from_now"),
+            ("days_until_survival_90pct", "days_until_survival_90pct_from_now"),
+        ):
+            expected, actual = single[single_key], row[batch_column]
+            if expected is None:
+                assert pd.isna(actual), f"{row['item_id']}.{batch_column}: single=None batch={actual}"
+            else:
+                assert expected == actual, (
+                    f"{row['item_id']}.{batch_column}: single={expected} batch={actual}"
+                )
 
 
 def test_kolom_mentah_scrap_batch_sama_dengan_current_state(batch, sample):

@@ -37,6 +37,7 @@ from partrisk.features import failure as feature_builder
 from partrisk.predict import failure as failure_model
 from partrisk.predict import risk as death_risk
 from partrisk.predict import scrap as scrap_model
+from partrisk.predict import survival as predict_survival
 from partrisk.serving import data_state, explanation, recommendation, settings
 from partrisk.serving.errors import DataSourceUnavailable
 
@@ -119,6 +120,8 @@ def _compute(generation: int) -> BatchScores:
     try:
         cycles = data_reader.get_cycles()
         events = data_reader.get_events()
+        episodes = data_reader.get_failure_episodes()
+        terminal_raw = data_reader.get_terminal_context()
     except psycopg.Error as error:
         raise DataSourceUnavailable(
             f"Database tidak bisa dibaca ({type(error).__name__})."
@@ -126,10 +129,12 @@ def _compute(generation: int) -> BatchScores:
 
     data_end = pd.Timestamp(cycles["dataset_max_event_on"].max())
 
-    failure, snapshot = _score_failure(cycles, events, data_end)
+    failure, snapshot, full_snapshot = _score_failure(cycles, events, data_end)
     scrap = _score_scrap(events, cycles, data_end, failure["item_id"])
+    survival_advisory = _score_survival_advisory(full_snapshot, events, cycles, episodes, terminal_raw)
 
     frame = failure.merge(scrap, on="item_id", how="left")
+    frame = frame.merge(survival_advisory, on="item_id", how="left")
     frame = _attach_context(frame, events)
     frame = _attach_recommendation(frame)
     frame = frame.sort_values("tier_score", ascending=False).reset_index(drop=True)
@@ -154,17 +159,20 @@ def _compute(generation: int) -> BatchScores:
 
 def _score_failure(
     cycles: pd.DataFrame, events: pd.DataFrame, data_end: pd.Timestamp
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Perantaian hazard yang sama seperti predict(), untuk semua PART aktif.
 
     Urutan panggilannya sengaja dibuat identik dengan predict.predict():
     current_observations -> attach_history -> attach_fleet_snapshot ->
     part_model_support -> project_features per langkah 30 hari.
 
-    Mengembalikan skor DAN nilai fitur mentahnya. Yang kedua dipakai halaman
+    Mengembalikan TIGA hal: skor, nilai fitur mentahnya (dipakai halaman
     detail untuk menjelaskan faktor risiko - fitur itu sudah dihitung di sini,
     jadi menyimpannya jauh lebih murah daripada membaca ulang database untuk
-    satu PART.
+    satu PART), dan snapshot PENUH (current_observations + history + fleet,
+    SEBELUM direduksi ke SOURCE_COLUMNS) - dipakai `_score_survival_advisory()`
+    supaya tidak perlu menghitung ulang current_observations/attach_history
+    untuk model survival (kolomnya identik, cuma model yang beda).
     """
     model, calibrator, metadata = failure_model.load_model()
 
@@ -215,7 +223,36 @@ def _score_failure(
     features_by_item.index = pd.Index(
         snapshot["item_identifier_clean"].to_numpy(), name="item_id"
     )
-    return result, features_by_item
+    return result, features_by_item, snapshot
+
+
+# ---------------------------------------------------------------------------
+# Survival event-based - field ADVISORY (mode aditif, lihat gate_decision.md)
+# ---------------------------------------------------------------------------
+
+
+def _score_survival_advisory(
+    full_snapshot: pd.DataFrame, events: pd.DataFrame, cycles: pd.DataFrame,
+    episodes: pd.DataFrame, terminal_raw: pd.DataFrame,
+) -> pd.DataFrame:
+    """median_days_to_failure/days_until_survival_90pct dari model survival
+    event-based - TIDAK dipakai menentukan risk_level, tier_score, ATAU rank
+    (murni CatBoost, lihat _score_failure). Field ADVISORY: kalau model
+    survival belum pernah dilatih, kolomnya tetap ada tapi seluruhnya None -
+    bukan kegagalan batch (predict_survival.load_model() dibungkus try/except
+    di sini, satu-satunya tempat error model survival ditelan sengaja)."""
+    item_ids = full_snapshot["item_identifier_clean"].to_numpy()
+    try:
+        model, encoder, metadata = predict_survival.load_model()
+    except FileNotFoundError:
+        return pd.DataFrame({
+            "item_id": item_ids,
+            "median_days_to_failure": np.nan,
+            "days_until_survival_90pct": np.nan,
+        })
+    return predict_survival.score_batch(
+        full_snapshot, events, cycles, episodes, terminal_raw, model, encoder, metadata
+    )
 
 
 # ---------------------------------------------------------------------------
