@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 from partrisk import config
+from partrisk.features.transforms import _log1p
 
 _DAY = np.timedelta64(1, "D")
 _TERMINAL_STATUS = set(config.FAILURE_OUTCOME_STATUS) | {config.REPAIR_COMPLETED_STATUS}
@@ -220,7 +221,3 @@ def build_features(episodes: pd.DataFrame, known_types: list[str]) -> pd.DataFra
         config.SCRAP_NUMERIC_FEATURES
     ].astype(float)
     return features[config.SCRAP_FEATURE_COLUMNS]
-
-
-def _log1p(values: pd.Series) -> pd.Series:
-    return np.log1p(pd.to_numeric(values, errors="coerce").fillna(0.0).clip(lower=0.0))
