@@ -10,8 +10,8 @@ metadata-nya dibagikan ke route /api/v1/model.
 from __future__ import annotations
 
 from partrisk import config
-from partrisk import predict as failure_model
-from partrisk import predict_scrap as scrap_model
+from partrisk.predict import failure as failure_model
+from partrisk.predict import scrap as scrap_model
 from partrisk.serving.errors import ModelUnavailable
 
 

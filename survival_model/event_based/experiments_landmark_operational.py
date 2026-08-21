@@ -55,7 +55,7 @@ import pandas as pd
 from partrisk import config, training_utils
 from partrisk.data import reader as data_reader
 from partrisk.features import failure as feature_builder
-from partrisk import predict as root_predict
+from partrisk.predict import failure as root_predict
 
 from src import install_context, previous_cycle
 from src import utils as survival_utils

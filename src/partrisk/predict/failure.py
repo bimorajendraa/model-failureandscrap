@@ -1,6 +1,6 @@
 """Prediksi risiko kerusakan untuk satu PART.
 
-    from partrisk.predict import predict
+    from partrisk.predict.failure import predict
     predict("PART-A")
 
 Pemanggil cukup memberi ID PART. Seluruh fitur dihitung sendiri dari riwayat
@@ -200,7 +200,7 @@ risk_level = _risk_level
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        raise SystemExit("Cara pakai: python predict.py <ITEM_ID>")
+        raise SystemExit("Cara pakai: python -m partrisk.predict.failure <ITEM_ID>")
     try:
         print(json.dumps(predict(sys.argv[1]), indent=2, ensure_ascii=False))
     except ItemNotScorable as error:

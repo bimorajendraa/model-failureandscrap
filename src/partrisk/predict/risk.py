@@ -1,12 +1,12 @@
 """Peluang PART benar-benar MATI (rusak DAN tidak bisa diperbaiki) - gabungan
 model failure dan model scrap (Fase B4 restrukturisasi - dedup, sebelumnya
-rumus yang sama ditulis terpisah di `predict_scrap.py`, `serving/predictor.py`,
+rumus yang sama ditulis terpisah di `predict/scrap.py`, `serving/predictor.py`,
 dan `serving/batch_predictor.py`).
 
-Sengaja di `partrisk/` (BUKAN `partrisk/serving/`) walau dipakai serving/ -
-`predict_scrap.py` (lapisan ML inti, dipakai berdiri sendiri lewat CLI-nya
-sendiri) juga butuh fungsi ini, dan lapisan ML inti tidak boleh bergantung
-pada lapisan serving DI ATASnya (lihat docstring api/__init__.py).
+Satu paket dengan predict/failure.py dan predict/scrap.py (lapisan ML inti,
+dipakai berdiri sendiri lewat CLI masing-masing) - BUKAN di partrisk/serving/,
+karena lapisan ML inti tidak boleh bergantung pada lapisan serving DI ATASnya
+(lihat docstring api/__init__.py), walau serving/ juga memakainya.
 
     P(mati) = P(rusak dalam horizon) x P(dibuang | rusak)
 
@@ -22,7 +22,7 @@ from __future__ import annotations
 def death_probability(failure_probability, scrap_probability):
     """Kedua faktornya sama-sama terkalibrasi, jadi hasil kalinya bisa
     dibaca sebagai perkiraan peluang - dengan catatan: cenderung
-    merendahkan (lihat docstring predict_scrap.py soal pergeseran tingkat
+    merendahkan (lihat docstring predict/scrap.py soal pergeseran tingkat
     scrap), dan urutannya lebih bisa dipercaya daripada nilainya sendiri.
 
     Bekerja untuk skalar (satu PART) maupun pandas Series (batch) - `round()`

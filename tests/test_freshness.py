@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 
 from partrisk.data import reader as data_reader
-from partrisk import predict as failure_model
+from partrisk.predict import failure as failure_model
 from partrisk.serving import data_state, predictor, query_cache
 from tests.conftest import needs_database, needs_models
 

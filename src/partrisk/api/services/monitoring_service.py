@@ -31,8 +31,8 @@ import numpy as np
 import pandas as pd
 
 from partrisk import config
-from partrisk import predict as failure_model
-from partrisk import predict_scrap as scrap_model
+from partrisk.predict import failure as failure_model
+from partrisk.predict import scrap as scrap_model
 from partrisk.serving import batch_predictor, explanation
 
 # Kolom numerik dari snapshot yang diringkas untuk deteksi feature drift -

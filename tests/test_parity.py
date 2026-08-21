@@ -21,8 +21,8 @@ import pytest
 
 from partrisk import config, scrap_features
 from partrisk.data import reader as data_reader
-from partrisk import predict as failure_model
-from partrisk import predict_scrap as scrap_model
+from partrisk.predict import failure as failure_model
+from partrisk.predict import scrap as scrap_model
 from partrisk.serving import batch_predictor
 from tests.conftest import needs_database, needs_models
 

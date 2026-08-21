@@ -1,11 +1,11 @@
 """Prediksi risiko sebuah PART dibuang (scrap).
 
-    from partrisk.predict_scrap import predict_scrap, predict_death_risk
+    from partrisk.predict.scrap import predict_scrap, predict_death_risk
 
     predict_scrap("PART-A")       # kalau PART ini rusak, apakah dibuang?
     predict_death_risk("PART-A")  # risiko MATI dalam 30 hari (gabungan)
 
-TERPISAH dari predict.py; fungsi predict() yang lama tidak berubah sama sekali.
+TERPISAH dari predict/failure.py; fungsi predict() yang lama tidak berubah sama sekali.
 
 DUA CARA PAKAI, dan hanya yang pertama yang sudah teruji kuat:
 
@@ -29,9 +29,10 @@ import sys
 
 import joblib
 
-from partrisk import config, death_risk, scrap_features
+from partrisk import config, scrap_features
 from partrisk.data import reader as data_reader
-from partrisk import predict as failure_model
+from partrisk.predict import failure as failure_model
+from partrisk.predict import risk as death_risk
 
 _LOADED: tuple[object, object, dict] | None = None
 
@@ -149,7 +150,7 @@ risk_level = failure_model._risk_level
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        raise SystemExit("Cara pakai: python predict_scrap.py <ITEM_ID>")
+        raise SystemExit("Cara pakai: python -m partrisk.predict.scrap <ITEM_ID>")
     try:
         print(json.dumps(predict_death_risk(sys.argv[1]), indent=2, ensure_ascii=False))
     except (ItemNotScorable, failure_model.ItemNotScorable) as error:

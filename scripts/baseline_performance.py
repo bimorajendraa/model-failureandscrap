@@ -27,7 +27,7 @@ def main() -> int:
     print(f"RSS sebelum apa pun dimuat: {_rss_mb():.1f} MB")
 
     print("\n[1/4] Cold model load...")
-    from partrisk import predict as failure_model
+    from partrisk.predict import failure as failure_model
 
     t0 = time.time()
     model, calibrator, metadata = failure_model.load_model()

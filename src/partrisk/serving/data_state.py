@@ -22,7 +22,7 @@ import time
 import pandas as pd
 
 from partrisk.data import reader as data_reader
-from partrisk import predict as failure_model
+from partrisk.predict import failure as failure_model
 from partrisk.serving import settings
 
 logger = logging.getLogger(__name__)
