@@ -1,11 +1,12 @@
 """Latih (atau latih ulang) model risiko scrap.
 
-    python train_scrap.py
+    python -m partrisk.training.scrap
 
 Menjawab: saat sebuah PART rusak, apakah kerusakan itu berakhir dibuang?
 
-TERPISAH dari train.py (model "kapan rusak") dan tidak menyentuhnya. Keduanya
-menjawab pertanyaan berbeda dan disimpan sebagai model berbeda.
+TERPISAH dari training/failure_classification.py (model "kapan rusak") dan
+tidak menyentuhnya. Keduanya menjawab pertanyaan berbeda dan disimpan
+sebagai model berbeda.
 
 Kandidat sengaja dibatasi pada model sederhana dan diregularisasi: kejadian
 scrap sedikit, dan menambah kerumitan terbukti menurunkan performa
@@ -47,8 +48,9 @@ from sklearn.model_selection import StratifiedKFold, cross_val_predict
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from partrisk import config, scrap_features, training_utils
+from partrisk import config, scrap_features
 from partrisk.data import reader as data_reader
+from partrisk.training import versioning as training_utils
 
 CURRENT_POINTER = config.SCRAP_MODEL_DIR / "CURRENT"
 

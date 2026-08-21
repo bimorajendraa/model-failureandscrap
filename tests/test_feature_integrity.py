@@ -19,9 +19,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from partrisk import config, scrap_features, train
+from partrisk import config, scrap_features
 from partrisk.features import failure as feature_builder
 from partrisk.predict import failure as failure_model
+from partrisk.training import failure_classification as train
 from tests.conftest import needs_database, needs_models
 
 # ---------------------------------------------------------------------------

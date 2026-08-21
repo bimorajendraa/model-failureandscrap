@@ -1,4 +1,4 @@
-"""Helper generik dipakai train.py dan train_scrap.py.
+"""Helper generik dipakai training/failure_classification.py dan training/scrap.py.
 
 Hanya bagian yang benar-benar identik di kedua file: penomoran versi model,
 metrik evaluasi, dan keputusan promosi. Feature engineering, kandidat model,

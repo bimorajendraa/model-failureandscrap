@@ -24,7 +24,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from partrisk import train, training_utils
+from partrisk.training import failure_classification as train
+from partrisk.training import versioning as training_utils
 from tests.conftest import needs_database, needs_models
 
 # ---------------------------------------------------------------------------

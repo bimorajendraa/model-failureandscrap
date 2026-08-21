@@ -1,6 +1,6 @@
 """Latih (atau latih ulang) model risiko kerusakan PART 30 hari.
 
-    python train.py
+    python -m partrisk.training.failure_classification
 
 Alurnya:
 
@@ -25,9 +25,10 @@ from catboost import CatBoostClassifier, Pool
 from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
-from partrisk import config, training_utils
+from partrisk import config
 from partrisk.data import reader as data_reader
 from partrisk.features import failure as feature_builder
+from partrisk.training import versioning as training_utils
 
 TRAIN, VALIDATION, TEST = "TRAIN", "VALIDATION", "TEST"
 CURRENT_POINTER = config.FAILURE_MODEL_DIR / "CURRENT"
@@ -395,7 +396,8 @@ def main() -> int:
         print(
             f"\n[TAHAN] Model production TETAP {previous} - {reason}.\n"
             f"        {version} tetap tersimpan untuk dibandingkan. Untuk tetap "
-            f"memakainya: python train.py --force-promote, atau tulis '{version}' "
+            f"memakainya: python -m partrisk.training.failure_classification --force-promote, "
+            f"atau tulis '{version}' "
             f"ke {CURRENT_POINTER}."
         )
     return 0

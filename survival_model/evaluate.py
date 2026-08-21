@@ -30,8 +30,9 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from partrisk import config, training_utils
-from partrisk import train as classification_train
+from partrisk import config
+from partrisk.training import versioning as training_utils
+from partrisk.training import failure_classification as classification_train
 
 import build_dataset
 from src import evaluation, features, utils

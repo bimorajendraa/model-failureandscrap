@@ -143,7 +143,8 @@ def main() -> int:
     }
 
     print("[4/4] Menghitung metrik operasional tiap kandidat (populasi SAMA, adil)...")
-    from partrisk import config, training_utils
+    from partrisk import config
+    from partrisk.training import versioning as training_utils
 
     rows_report = []
     for label, risk in candidates.items():
