@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 import psycopg
 
-from partrisk import config, data_reader, scrap_features
+from partrisk import config, data_reader, death_risk, scrap_features
 from partrisk.features import failure as feature_builder
 from partrisk import predict as failure_model
 from partrisk import predict_scrap as scrap_model
@@ -337,10 +337,9 @@ def _attach_recommendation(frame: pd.DataFrame) -> pd.DataFrame:
         recommendation.is_replacement_candidate(failure_level, scrap_level)
         for failure_level, scrap_level in zip(frame["failure_risk_level"], scrap_levels)
     ]
-    # Rumus sama dengan predict_scrap.predict_death_risk().
-    frame[f"death_probability_{horizon}d"] = (
-        frame[f"failure_probability_{horizon}d"] * frame["scrap_probability"]
-    ).round(5)
+    frame[f"death_probability_{horizon}d"] = death_risk.death_probability(
+        frame[f"failure_probability_{horizon}d"], frame["scrap_probability"]
+    )
     return frame
 
 

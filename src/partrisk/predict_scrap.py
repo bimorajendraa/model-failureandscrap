@@ -29,7 +29,7 @@ import sys
 
 import joblib
 
-from partrisk import config, data_reader, scrap_features
+from partrisk import config, data_reader, death_risk, scrap_features
 from partrisk import predict as failure_model
 
 _LOADED: tuple[object, object, dict] | None = None
@@ -124,10 +124,9 @@ def predict_death_risk(item_id: str) -> dict:
         "item_id": scrap["item_id"],
         f"failure_probability_{horizon}d": failure_probability,
         "scrap_probability": scrap_probability,
-        # Kedua faktornya kini sama-sama terkalibrasi, jadi hasil kalinya
-        # bisa dibaca sebagai perkiraan peluang - dengan catatan yang sama:
-        # cenderung merendahkan, dan urutannya lebih bisa dipercaya.
-        f"death_probability_{horizon}d": round(failure_probability * scrap_probability, 5),
+        f"death_probability_{horizon}d": death_risk.death_probability(
+            failure_probability, scrap_probability
+        ),
         "failure_risk_level": failure["risk_level"],
         "scrap_risk_level": scrap["scrap_risk_level"],
         "item_type_known_to_model": scrap["item_type_known_to_model"],

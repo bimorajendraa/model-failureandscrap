@@ -17,7 +17,7 @@ from __future__ import annotations
 import pandas as pd
 import psycopg
 
-from partrisk import config, data_reader
+from partrisk import config, data_reader, death_risk
 from partrisk.features import failure as feature_builder
 from partrisk import predict as failure_model
 from partrisk import predict_scrap as scrap_model
@@ -117,11 +117,12 @@ def get_part_assessment(item_id: str, include_explanation: bool = True) -> dict:
             "as_of": failure["as_of"],
             "failure": failure,
             "scrap": scrap,
-            # Rumus sama dengan predict_scrap.predict_death_risk(): peluang PART
-            # benar-benar MATI = peluang rusak x peluang tidak bisa diperbaiki.
-            # Dihitung di sini supaya kedua model tidak perlu dijalankan dua kali.
+            # Dihitung di sini (bukan panggil predict_scrap.predict_death_risk())
+            # supaya kedua model tidak perlu dijalankan dua kali.
             f"death_probability_{horizon}d": (
-                round(failure[f"failure_probability_{horizon}d"] * scrap["scrap_probability"], 5)
+                death_risk.death_probability(
+                    failure[f"failure_probability_{horizon}d"], scrap["scrap_probability"]
+                )
                 if scrap
                 else None
             ),
