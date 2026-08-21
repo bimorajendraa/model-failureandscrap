@@ -10,15 +10,12 @@ from __future__ import annotations
 
 import gc
 import statistics
-import sys
 import time
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
 import psutil
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
 
 
 def _rss_mb() -> float:
@@ -30,7 +27,7 @@ def main() -> int:
     print(f"RSS sebelum apa pun dimuat: {_rss_mb():.1f} MB")
 
     print("\n[1/4] Cold model load...")
-    import predict as failure_model
+    from partrisk import predict as failure_model
 
     t0 = time.time()
     model, calibrator, metadata = failure_model.load_model()
@@ -49,7 +46,7 @@ def main() -> int:
     print(f"      TOTAL: {total_bytes / 1e6:.3f} MB")
 
     print("\n[3/4] Single predict() p50 (20 PART aktif)...")
-    import data_reader
+    from partrisk import data_reader
 
     cycles = data_reader.get_cycles()
     active = cycles.loc[
@@ -76,7 +73,7 @@ def main() -> int:
     print("\n[4/4] Batch penuh (seluruh PART aktif)...")
     gc.collect()
     rss_before_batch = _rss_mb()
-    from inference import batch_predictor
+    from partrisk.serving import batch_predictor
 
     t0 = time.time()
     batch = batch_predictor.score_active_parts(force_refresh=True)

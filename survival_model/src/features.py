@@ -38,8 +38,7 @@ from __future__ import annotations
 import pandas as pd
 from sklearn.preprocessing import OneHotEncoder
 
-import config
-import feature_builder
+from partrisk import config, feature_builder
 
 from . import categorical_support, install_context, previous_cycle
 

@@ -15,9 +15,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 SURVIVAL_DIR = Path(__file__).resolve().parent.parent
 if str(SURVIVAL_DIR) not in sys.path:
     sys.path.insert(0, str(SURVIVAL_DIR))
@@ -27,7 +24,7 @@ sys.path.insert(0, str(EVENT_BASED_DIR))  # lihat catatan build_dataset.py/train
 import numpy as np
 import pandas as pd
 
-import data_reader
+from partrisk import data_reader
 
 from src import categorical_support, evaluation, model_fit
 

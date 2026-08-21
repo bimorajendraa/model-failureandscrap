@@ -13,19 +13,13 @@ memeriksa logic murni (mis. tests/test_recommendation.py).
 from __future__ import annotations
 
 import os
-import sys
-from pathlib import Path
 
 import pytest
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 
 
 def _database_available() -> bool:
     try:
-        import data_reader
+        from partrisk import data_reader
 
         with data_reader.connect() as conn:
             with conn.cursor() as cur:
@@ -37,7 +31,7 @@ def _database_available() -> bool:
 
 def _models_available() -> bool:
     try:
-        from inference import model_loader
+        from partrisk.serving import model_loader
 
         model_loader.versions()
         return True
@@ -88,7 +82,7 @@ needs_internet = pytest.mark.skipif(
 def client():
     from fastapi.testclient import TestClient
 
-    from api.main import app
+    from partrisk.api.main import app
 
     with TestClient(app) as test_client:
         yield test_client
@@ -97,7 +91,7 @@ def client():
 @pytest.fixture(scope="session")
 def batch():
     """Hasil batch scoring, dihitung sekali untuk seluruh sesi test."""
-    from inference import batch_predictor
+    from partrisk.serving import batch_predictor
 
     return batch_predictor.score_active_parts()
 
@@ -115,7 +109,7 @@ def not_scorable_item(batch) -> str:
     Dicari dari data, bukan ditulis tetap: ID yang hari ini tidak terpasang
     bisa saja terpasang lagi besok.
     """
-    import data_reader
+    from partrisk import data_reader
 
     active = set(batch.frame["item_id"])
     events = data_reader.get_events()

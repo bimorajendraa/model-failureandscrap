@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-import config
+from partrisk import config
 from tests.conftest import needs_database, needs_models
 
 pytestmark = [needs_database, needs_models]
@@ -160,7 +160,7 @@ def test_cari_yang_tidak_cocok_mengembalikan_kosong(client):
 
 def test_cors_tertutup_secara_bawaan(client):
     """Origin browser harus disebutkan eksplisit, bukan dibuka untuk semua."""
-    from api import settings
+    from partrisk.api import settings
 
     if settings.CORS_ALLOW_ORIGINS:
         pytest.skip("CORS memang sedang dikonfigurasi di environment ini")
@@ -173,11 +173,11 @@ def test_cors_aktif_saat_origin_didaftarkan(monkeypatch):
 
     from fastapi.testclient import TestClient
 
-    import api.main
-    from api import settings
+    import partrisk.api.main
+    from partrisk.api import settings
 
     monkeypatch.setattr(settings, "CORS_ALLOW_ORIGINS", ["http://localhost:3000"])
-    module = importlib.reload(api.main)
+    module = importlib.reload(partrisk.api.main)
     try:
         with TestClient(module.app) as configured:
             response = configured.get(
@@ -186,7 +186,7 @@ def test_cors_aktif_saat_origin_didaftarkan(monkeypatch):
         assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
     finally:
         monkeypatch.undo()
-        importlib.reload(api.main)
+        importlib.reload(partrisk.api.main)
 
 
 def test_paging_rekomendasi(client):
@@ -224,7 +224,7 @@ def test_overview(client):
 
 
 def test_batas_limit_dijaga(client):
-    from api import settings
+    from partrisk.api import settings
 
     body = client.get(
         "/api/v1/recommendations", params={"limit": settings.MAX_RECOMMENDATION_LIMIT * 10}

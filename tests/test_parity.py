@@ -19,12 +19,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import config
-import data_reader
-import predict as failure_model
-import predict_scrap as scrap_model
-import scrap_features
-from inference import batch_predictor
+from partrisk import config, data_reader, scrap_features
+from partrisk import predict as failure_model
+from partrisk import predict_scrap as scrap_model
+from partrisk.serving import batch_predictor
 from tests.conftest import needs_database, needs_models
 
 pytestmark = [needs_database, needs_models]

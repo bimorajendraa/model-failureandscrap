@@ -24,8 +24,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import train
-import training_utils
+from partrisk import train, training_utils
 from tests.conftest import needs_database, needs_models
 
 # ---------------------------------------------------------------------------
@@ -167,9 +166,7 @@ def test_evaluate_incumbent_menghasilkan_skor_valid():
     hanya memastikan mekanismenya jalan dan hasilnya masuk akal."""
     import pandas as pd
 
-    import config
-    import data_reader
-    import feature_builder
+    from partrisk import config, data_reader, feature_builder
 
     events = data_reader.get_events()
     cycles = data_reader.get_cycles()

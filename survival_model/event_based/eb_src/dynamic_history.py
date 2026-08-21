@@ -31,7 +31,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-import feature_builder
+from partrisk import feature_builder
 
 
 def cumulative_cycle_age(cycles: pd.DataFrame) -> pd.DataFrame:

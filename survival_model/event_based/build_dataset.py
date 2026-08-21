@@ -22,9 +22,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 SURVIVAL_DIR = Path(__file__).resolve().parent.parent
 if str(SURVIVAL_DIR) not in sys.path:
     sys.path.insert(0, str(SURVIVAL_DIR))
@@ -33,11 +30,11 @@ EVENT_BASED_DIR = Path(__file__).resolve().parent
 # OTOMATIS menyisipkan direktori skrip ini sendiri (EVENT_BASED_DIR) ke
 # sys.path[0] SEBELUM baris ini jalan - guard "not in sys.path" jadi True
 # lalu insert di atas DILEWATI, dan EVENT_BASED_DIR tetap di posisinya
-# semula (index 0) SAMPAI insert ROOT_DIR/SURVIVAL_DIR di atas mendorongnya
-# ke urutan KE-3 (di BELAKANG SURVIVAL_DIR) - `import build_dataset` lalu
-# salah resolve ke survival_model/build_dataset.py (statis, nama modul
-# sama). Insert TANPA syarat di sini memaksa EVENT_BASED_DIR balik ke index
-# 0, apa pun yang terjadi sebelumnya.
+# semula (index 0) SAMPAI insert SURVIVAL_DIR di atas mendorongnya ke
+# urutan KE-2 - `import build_dataset` lalu salah resolve ke
+# survival_model/build_dataset.py (statis, nama modul sama). Insert TANPA
+# syarat di sini memaksa EVENT_BASED_DIR balik ke index 0, apa pun yang
+# terjadi sebelumnya.
 sys.path.insert(0, str(EVENT_BASED_DIR))
 
 import os
@@ -45,8 +42,7 @@ import os
 import joblib
 import pandas as pd
 
-import data_reader
-import feature_builder
+from partrisk import data_reader, feature_builder
 
 from src import install_context, lifecycle_builder, previous_cycle
 

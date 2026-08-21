@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from inference import explanation
+from partrisk.serving import explanation
 
 
 def _row(**overrides) -> pd.Series:
@@ -96,7 +96,7 @@ def test_faktor_hanya_muncul_kalau_datanya_ada():
 
 def test_umur_pemasangan_jadi_faktor_risiko_hanya_di_kelompok_tertua():
     """Ambangnya memakai kelompok umur milik model, bukan angka karangan."""
-    import config
+    from partrisk import config
 
     muda = explanation.risk_factors(_row(days_since_installation=20.0))
     tua = explanation.risk_factors(
@@ -122,7 +122,7 @@ def test_kondisi_armada_dilaporkan_dengan_jumlah_unit():
 
 
 def test_caveat_muncul_untuk_model_part_berdukungan_rendah():
-    import config
+    from partrisk import config
 
     sedikit = explanation.caveats(_row(), {"0521201": 5})
     banyak = explanation.caveats(_row(), {"0521201": config.MIN_PART_MODEL_SUPPORT + 1})

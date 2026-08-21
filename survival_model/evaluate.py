@@ -18,14 +18,10 @@ classification - supaya tidak membandingkan C-index vs ROC-AUC secara naif.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import sys
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 SURVIVAL_DIR = Path(__file__).resolve().parent
 if str(SURVIVAL_DIR) not in sys.path:
     sys.path.insert(0, str(SURVIVAL_DIR))
@@ -34,25 +30,14 @@ import joblib
 import numpy as np
 import pandas as pd
 
-import config
-import training_utils
+from partrisk import config, training_utils
+from partrisk import train as classification_train
 
 import build_dataset
 from src import evaluation, features, utils
 
 ARTIFACTS_DIR = SURVIVAL_DIR / "artifacts"
 REPORTS_DIR = SURVIVAL_DIR / "reports"
-
-
-def _load_root_module(name: str, filename: str):
-    """Muat train.py DARI ROOT lewat file path, bukan `import train` biasa -
-    survival_model/train.py sendiri punya nama file yang sama, dan sys.path
-    berbasis nama akan ambigu. Ini menghindari itu sepenuhnya."""
-    spec = importlib.util.spec_from_file_location(name, ROOT_DIR / filename)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def load_artifacts() -> dict:
@@ -110,7 +95,6 @@ def load_classification_test_rows() -> tuple:
     (evaluate.py maupun experiments.py yang menguji puluhan kandidat), bukan
     per model.
     """
-    classification_train = _load_root_module("classification_train", "train.py")
     c_dataset, _c_features, _support, _data_end, _events, _cycles, _episodes = (
         classification_train.build_dataset()
     )

@@ -4,7 +4,7 @@
     python scripts/run_prediction.py --output hasil.csv
     python scripts/run_prediction.py --top 20
 
-Memanggil inference.batch_predictor - modul yang SAMA PERSIS dipakai
+Memanggil partrisk.serving.batch_predictor - modul yang SAMA PERSIS dipakai
 `GET /api/v1/recommendations` - supaya hasil lewat CLI dan lewat API tidak
 mungkin berbeda. Tidak menulis ke database (belum perlu prediction database
 untuk tahap ini - lihat README); `--output` opsional hanya menulis CSV lokal
@@ -15,15 +15,9 @@ from __future__ import annotations
 
 import argparse
 import logging
-import sys
 import time
-from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
-from inference import batch_predictor, model_loader
+from partrisk.serving import batch_predictor, model_loader
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("prediction")

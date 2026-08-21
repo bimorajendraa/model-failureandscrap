@@ -28,16 +28,11 @@ yang sedang dicari.
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 
 # Kolom yang SENGAJA dikecualikan dari perbandingan nilai - bukan bug kalau
 # beda, memang seharusnya beda antar dua kali generate.
@@ -45,7 +40,7 @@ _VOLATILE_COLUMNS = {"rank"}  # urutan bisa goyah kalau ada dua tier_score persi
 
 
 def _load_batch():
-    from inference import batch_predictor
+    from partrisk.serving import batch_predictor
 
     return batch_predictor.score_active_parts(force_refresh=True)
 

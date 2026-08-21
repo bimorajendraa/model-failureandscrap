@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from api.services import geocoding_service
+from partrisk.api.services import geocoding_service
 from tests.conftest import needs_database, needs_internet, needs_models
 
 pytestmark = [needs_database, needs_models, needs_internet]

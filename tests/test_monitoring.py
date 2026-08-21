@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import config
-from api.services import monitoring_service
+from partrisk import config
+from partrisk.api.services import monitoring_service
 from tests.conftest import needs_database, needs_models
 
 # ---------------------------------------------------------------------------

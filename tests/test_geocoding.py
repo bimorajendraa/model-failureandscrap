@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from api.services import geocoding_service as gs
+from partrisk.api.services import geocoding_service as gs
 
 
 @pytest.fixture(autouse=True)

@@ -19,9 +19,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 SURVIVAL_DIR = Path(__file__).resolve().parent
 if str(SURVIVAL_DIR) not in sys.path:
     sys.path.insert(0, str(SURVIVAL_DIR))
@@ -32,8 +29,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-import data_reader
-import feature_builder
+from partrisk import data_reader, feature_builder
 
 from src import features, install_context, lifecycle_builder, utils
 

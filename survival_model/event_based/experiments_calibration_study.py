@@ -35,9 +35,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 SURVIVAL_DIR = Path(__file__).resolve().parent.parent
 if str(SURVIVAL_DIR) not in sys.path:
     sys.path.insert(0, str(SURVIVAL_DIR))
@@ -51,7 +48,7 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import brier_score_loss
 
 import build_dataset
-import config
+from partrisk import config
 from src import model_fit
 from src import utils as survival_utils
 

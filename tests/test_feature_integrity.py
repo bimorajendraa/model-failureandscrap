@@ -19,11 +19,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import config
-import feature_builder
-import predict as failure_model
-import scrap_features
-import train
+from partrisk import config, feature_builder, scrap_features, train
+from partrisk import predict as failure_model
 from tests.conftest import needs_database, needs_models
 
 # ---------------------------------------------------------------------------

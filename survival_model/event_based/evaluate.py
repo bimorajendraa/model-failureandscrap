@@ -33,9 +33,6 @@ import json
 import sys
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 SURVIVAL_DIR = Path(__file__).resolve().parent.parent
 if str(SURVIVAL_DIR) not in sys.path:
     sys.path.insert(0, str(SURVIVAL_DIR))
@@ -44,7 +41,7 @@ sys.path.insert(0, str(EVENT_BASED_DIR))  # lihat catatan di build_dataset.py/tr
 
 import joblib
 
-import config
+from partrisk import config
 
 from src import evaluation, model_fit
 
@@ -56,9 +53,13 @@ def _load_static_evaluate():
     """Muat survival_model/evaluate.py (parent) lewat file path, BUKAN
     `import evaluate` biasa - modul INI SENDIRI juga bernama evaluate.py
     (event_based/evaluate.py), `import evaluate` akan meng-import DIRINYA
-    SENDIRI (self-import) alih-alih versi statis. Pola SAMA dengan
-    survival_model/evaluate.py::_load_root_module() (untuk masalah serupa
-    dengan train.py di root vs survival_model/train.py)."""
+    SENDIRI (self-import) alih-alih versi statis. `train.py`/`predict.py` di
+    root TIDAK butuh pola ini lagi setelah restrukturisasi src/partrisk/ -
+    keduanya sekarang punya nama qualified unik (`partrisk.train`,
+    `partrisk.predict`), tidak lagi bertabrakan nama bare dengan
+    survival_model/train.py. survival_model/evaluate.py di sini TETAP
+    bertabrakan nama dengan file ini sendiri, jadi trik file-path TETAP
+    perlu - cuma untuk kasus INI."""
     spec = importlib.util.spec_from_file_location("static_survival_evaluate", SURVIVAL_DIR / "evaluate.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules["static_survival_evaluate"] = module

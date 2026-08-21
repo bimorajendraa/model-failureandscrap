@@ -17,16 +17,9 @@ tempat baru - urutan di bawah ini tidak berubah.
 from __future__ import annotations
 
 import logging
-import sys
 import time
-from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-
-import data_reader
-import feature_builder
+from partrisk import data_reader, feature_builder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("pipeline")

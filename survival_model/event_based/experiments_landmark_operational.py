@@ -40,9 +40,6 @@ import sys
 import time
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
 SURVIVAL_DIR = Path(__file__).resolve().parent.parent
 if str(SURVIVAL_DIR) not in sys.path:
     sys.path.insert(0, str(SURVIVAL_DIR))
@@ -55,10 +52,8 @@ import joblib
 import numpy as np
 import pandas as pd
 
-import config
-import data_reader
-import feature_builder
-import training_utils
+from partrisk import config, data_reader, feature_builder, training_utils
+from partrisk import predict as root_predict
 
 from src import install_context, previous_cycle
 from src import utils as survival_utils
@@ -71,27 +66,20 @@ CHUNK_SIZE = 2000
 HORIZON_DAYS = 30.0
 
 
-def _load_by_path(name: str, path: Path):
-    """Muat modul .py lewat path, bukan `import` biasa - `evaluate.py` DAN
-    `predict.py` masing-masing punya 2-3 versi bernama sama di
-    survival_model/ dan survival_model/event_based/, dan EVENT_BASED_DIR
-    ada paling depan di sys.path skrip ini - `import predict`/`import
-    evaluate` polos akan salah resolve ke versi event-based, bukan root."""
+def _load_static_evaluate():
+    """Muat survival_model/evaluate.py lewat file path, BUKAN `import
+    evaluate` biasa - event_based/evaluate.py punya nama file yang sama.
+    `predict.py` di root TIDAK butuh trik ini lagi setelah restrukturisasi
+    src/partrisk/ - sudah punya nama qualified unik (`partrisk.predict`,
+    lihat `root_predict` di atas), tidak lagi bertabrakan nama bare dengan
+    event_based/predict.py."""
     import importlib.util
 
-    spec = importlib.util.spec_from_file_location(name, path)
+    spec = importlib.util.spec_from_file_location("static_evaluate_for_gate", SURVIVAL_DIR / "evaluate.py")
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    sys.modules["static_evaluate_for_gate"] = module
     spec.loader.exec_module(module)
     return module
-
-
-def _load_static_evaluate():
-    return _load_by_path("static_evaluate_for_gate", SURVIVAL_DIR / "evaluate.py")
-
-
-def _load_root_predict():
-    return _load_by_path("root_predict_for_gate", ROOT_DIR / "predict.py")
 
 
 def build_landmark_features_at_observation(
@@ -203,7 +191,7 @@ def main() -> int:
     # populasinya SUDAH sama persis. Skor CatBoost lewat jalur produksi asli
     # (predict.py punya cache global, jadi panggil feature_builder langsung
     # pada frame yang sudah ada, bukan predict() per item).
-    catboost_predict = _load_root_predict()
+    catboost_predict = root_predict
 
     cb_model, cb_calibrator, cb_metadata = catboost_predict.load_model()
     cb_support = feature_builder.part_model_support(test_rows, cb_metadata["part_model_support"])

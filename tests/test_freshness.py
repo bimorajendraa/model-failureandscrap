@@ -10,10 +10,9 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-import data_reader
-import predict as failure_model
-from inference import data_state, query_cache
-from inference import predictor
+from partrisk import data_reader
+from partrisk import predict as failure_model
+from partrisk.serving import data_state, predictor, query_cache
 from tests.conftest import needs_database, needs_models
 
 pytestmark = [needs_database, needs_models]
@@ -142,7 +141,7 @@ def test_argumen_berbeda_tidak_saling_menimpa(scorable_item, batch):
 def test_penjelasan_dari_batch_sama_dengan_yang_dihitung_langsung(batch, scorable_item):
     """Halaman detail memakai fitur hasil batch kalau tersedia. Nilainya harus
     sama persis dengan yang dibangun untuk satu PART."""
-    from inference import explanation
+    from partrisk.serving import explanation
 
     from_batch = predictor._feature_row(scorable_item)
     direct = predictor._active_snapshot(scorable_item).iloc[0]
@@ -157,7 +156,7 @@ def test_penjelasan_dari_batch_sama_dengan_yang_dihitung_langsung(batch, scorabl
 
 def test_penjelasan_tidak_memicu_batch_saat_cache_kosong(scorable_item):
     """Menjelaskan satu PART tidak boleh memaksa seluruh armada diskor."""
-    from inference import batch_predictor
+    from partrisk.serving import batch_predictor
 
     saved = batch_predictor._CACHE
     batch_predictor._CACHE = None

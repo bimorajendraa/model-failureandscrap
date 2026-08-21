@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-import config
+from partrisk import config
 
 TRAIN, VALIDATION, TEST, EXCLUDED_TOO_OLD = "TRAIN", "VALIDATION", "TEST", "EXCLUDED_TOO_OLD"
 

@@ -6,7 +6,7 @@ import itertools
 
 import pytest
 
-from inference.recommendation import (
+from partrisk.serving.recommendation import (
     PRIORITY_ORDER,
     RISK_LEVELS,
     is_replacement_candidate,
