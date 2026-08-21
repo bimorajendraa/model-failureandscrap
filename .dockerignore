@@ -6,3 +6,14 @@ catboost_info
 .env
 .pytest_cache
 *.md
+
+# Eksperimen survival - artifact-nya bisa berukuran GB (RandomSurvivalForest
+# menyimpan kurva per leaf node) dan reports/eksperimen tidak dibutuhkan
+# runtime. Tanpa baris ini, `COPY . .` di Dockerfile menyeret ~5,8 GB
+# artifact eksperimen ke setiap image production (lihat reports/gate_decision.md
+# fase restrukturisasi survival - Fase 0.1).
+survival_model/
+reports/
+tests/
+.cache/
+models/*/*/eval/
