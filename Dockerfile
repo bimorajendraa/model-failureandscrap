@@ -17,6 +17,21 @@ WORKDIR /app
 COPY requirements.lock.txt ./
 RUN pip install --no-cache-dir -r requirements.lock.txt
 
+# Paket partrisk sendiri (src/partrisk/) di layer terpisah dari requirements
+# di atas - perubahan kode tidak memaksa install ulang seluruh dependensi.
+# --no-deps: requirements.lock.txt di atas SUDAH otoritatif untuk versi
+# dependensi runtime (lihat pyproject.toml soal kenapa dependencies=[]).
+COPY pyproject.toml ./
+COPY src/ ./src/
+RUN pip install --no-cache-dir --no-deps .
+
+# `pip install .` (BUKAN -e) MENYALIN src/partrisk/ ke site-packages, terlepas
+# dari /app - config/paths.py punya default struktural (naik dari lokasi
+# file config.py sendiri) yang jadi SALAH begitu package pindah lokasi seperti
+# ini. PARTRISK_HOME eksplisit di sini memastikan models/ dan .env tetap
+# ditemukan di /app, bukan di dalam site-packages - lihat Fase B0/B1 restrukturisasi.
+ENV PARTRISK_HOME=/app
+
 # Model ikut masuk image: versinya harus persis yang sudah diuji, bukan yang
 # kebetulan ada di host saat container jalan.
 COPY . .
@@ -31,4 +46,4 @@ EXPOSE 8000 8501
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "partrisk.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
