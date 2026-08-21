@@ -19,7 +19,8 @@ from __future__ import annotations
 import logging
 import time
 
-from partrisk import data_reader, feature_builder
+from partrisk import data_reader
+from partrisk.features import failure as feature_builder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("pipeline")

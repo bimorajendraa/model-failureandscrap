@@ -166,7 +166,8 @@ def test_evaluate_incumbent_menghasilkan_skor_valid():
     hanya memastikan mekanismenya jalan dan hasilnya masuk akal."""
     import pandas as pd
 
-    from partrisk import config, data_reader, feature_builder
+    from partrisk import config, data_reader
+    from partrisk.features import failure as feature_builder
 
     events = data_reader.get_events()
     cycles = data_reader.get_cycles()

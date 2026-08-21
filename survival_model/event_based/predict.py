@@ -31,7 +31,8 @@ sys.path.insert(0, str(EVENT_BASED_DIR))  # lihat catatan di build_dataset.py/tr
 import joblib
 import pandas as pd
 
-from partrisk import data_reader, feature_builder
+from partrisk import data_reader
+from partrisk.features import failure as feature_builder
 
 from src import install_context, previous_cycle, utils
 

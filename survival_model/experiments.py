@@ -34,7 +34,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from partrisk import feature_builder
+from partrisk.features import failure as feature_builder
 
 import build_dataset
 import evaluate

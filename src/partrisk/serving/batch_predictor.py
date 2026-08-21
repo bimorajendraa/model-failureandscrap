@@ -31,7 +31,8 @@ import numpy as np
 import pandas as pd
 import psycopg
 
-from partrisk import config, data_reader, feature_builder, scrap_features
+from partrisk import config, data_reader, scrap_features
+from partrisk.features import failure as feature_builder
 from partrisk import predict as failure_model
 from partrisk import predict_scrap as scrap_model
 from partrisk.serving import data_state, explanation, recommendation, settings

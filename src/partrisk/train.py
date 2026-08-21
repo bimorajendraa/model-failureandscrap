@@ -25,7 +25,8 @@ from catboost import CatBoostClassifier, Pool
 from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
-from partrisk import config, data_reader, feature_builder, training_utils
+from partrisk import config, data_reader, training_utils
+from partrisk.features import failure as feature_builder
 
 TRAIN, VALIDATION, TEST = "TRAIN", "VALIDATION", "TEST"
 CURRENT_POINTER = config.FAILURE_MODEL_DIR / "CURRENT"

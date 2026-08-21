@@ -60,7 +60,8 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import OneHotEncoder
 
-from partrisk import config, feature_builder
+from partrisk import config
+from partrisk.features import failure as feature_builder
 
 from src import categorical_support  # survival_model/src (parent) - lihat README teknis soal path
 

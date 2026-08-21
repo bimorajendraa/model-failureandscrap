@@ -27,7 +27,8 @@ import joblib
 import pandas as pd
 from catboost import CatBoostClassifier
 
-from partrisk import config, data_reader, feature_builder
+from partrisk import config, data_reader
+from partrisk.features import failure as feature_builder
 
 _LOADED: tuple[CatBoostClassifier, object, dict] | None = None
 _FLEET: object = None
