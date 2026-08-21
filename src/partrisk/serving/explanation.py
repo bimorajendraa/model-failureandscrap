@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 
 from partrisk import config
+from partrisk.features.transforms import _age_band
 
 DISCLAIMER = (
     "Faktor di bawah adalah kondisi PART yang menjadi masukan model, bukan "
@@ -191,5 +192,7 @@ def caveats(row: pd.Series, support_by_model: dict[str, int]) -> list[str]:
 
 
 def _age_band_label(days: float) -> str:
-    index = int(np.searchsorted(config.AGE_BAND_THRESHOLDS, days, side="right"))
-    return config.AGE_BAND_LABELS[index]
+    # Sama persis dengan partrisk.features.transforms._age_band (Fase B4
+    # dedup) - dibungkus Series satu baris karena versi itu vektor (dipakai
+    # build_features), di sini butuh satu label untuk satu PART.
+    return _age_band(pd.Series([days])).iloc[0]
