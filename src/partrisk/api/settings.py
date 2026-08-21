@@ -12,15 +12,9 @@ import os
 from dotenv import load_dotenv
 
 from partrisk import config
+from partrisk._env import _int
 
 load_dotenv(config.ENV_FILE)
-
-
-def _int(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, default))
-    except ValueError:
-        return default
 
 
 # Hitung batch saat aplikasi start (bukan saat request pertama datang).

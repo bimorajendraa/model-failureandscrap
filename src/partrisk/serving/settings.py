@@ -2,15 +2,7 @@
 
 from __future__ import annotations
 
-import os
-
-
-def _int(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, default))
-    except ValueError:
-        return default
-
+from partrisk._env import _int
 
 # Berapa lama hasil batch scoring dipakai ulang sebelum dihitung ulang. Data
 # sumber hanya bertambah beberapa kali sehari, dan satu kali batch memakan
