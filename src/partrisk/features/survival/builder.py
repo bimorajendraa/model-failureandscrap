@@ -1,30 +1,30 @@
-"""Fitur event-based: SAMA seperti fitur final model statis
-(`survival_model/src/features.py`) DITAMBAH umur pemasangan
-(`log_days_since_installation`/`installation_age_band`).
+"""Fitur event-based: SAMA seperti fitur final model statis (lineage-nya
+sudah dihapus - event-based menang di semua metrik operasional, lihat
+gate_decision.md) DITAMBAH umur pemasangan (`log_days_since_installation`/
+`installation_age_band`).
 
-Model statis men-drop 2 fitur itu karena SELALU konstan (umur=0, sebab
-observation_on==installed_on selalu di sana - lihat
-survival_model/src/features.py). Di sini observation_on = landmark
-(`eb_src.landmark_builder`), BUKAN installed_on lagi - umur pemasangan jadi
-sinyal UTAMA (persis Tahap 8: "current age" adalah fitur kondisi PART
-pertama yang diminta), jadi DIPERTAHANKAN, bukan di-drop.
+Model statis dulu men-drop 2 fitur itu karena SELALU konstan (umur=0, sebab
+observation_on==installed_on selalu di sana). Di sini observation_on =
+landmark (`features.survival.landmarks`), BUKAN installed_on lagi - umur
+pemasangan jadi sinyal UTAMA (persis Tahap 8: "current age" adalah fitur
+kondisi PART pertama yang diminta), jadi DIPERTAHANKAN, bukan di-drop.
 
 Reuse SEPENUHNYA (tidak ada logic baru untuk hal yang sudah ada):
 - `feature_builder.attach_history`/`attach_fleet`: sudah generik terhadap
   kolom `observation_on` - dipanggil dengan observation_on=landmark, bukan
   installed_on, otomatis menghitung ulang riwayat/armada PADA UMUR itu.
-- `install_context.attach_install_context` (survival_model/src, parent):
+- `install_context.attach_install_context` (features/survival, satu paket):
   konteks instalasi KONSTAN per lifecycle - benar untuk di-merge apa adanya
   ke semua landmark milik lifecycle yang sama.
-- `previous_cycle` (survival_model/src, parent): previous-cycle KONSTAN per
-  lifecycle (bicara tentang siklus SEBELUMNYA, bukan siklus berjalan) -
+- `previous_cycle` (features/survival, satu paket): previous-cycle KONSTAN
+  per lifecycle (bicara tentang siklus SEBELUMNYA, bukan siklus berjalan) -
   benar untuk di-merge apa adanya ke semua landmark.
-- Threshold kategori (part_model=200, item_type=300): dipakai APA ADANYA
-  dari `survival_model/src/features.FINAL_CATEGORY_THRESHOLDS` - hasil
-  sweep VALIDATION yang sudah divalidasi utuh untuk populasi lifecycle
-  survival. TIDAK di-sweep ulang khusus populasi landmark (proporsional -
-  populasi dasarnya sama, hanya jumlah baris per lifecycle yang berbeda;
-  re-sweep adalah kandidat penyempurnaan lanjutan, bukan blocker).
+- Threshold kategori (part_model=200, item_type=300, lihat
+  FINAL_CATEGORY_THRESHOLDS di bawah): angka yang sama dengan hasil sweep
+  VALIDATION model statis (populasi lifecycle dasarnya sama). TIDAK di-sweep
+  ulang khusus populasi landmark (proporsional - populasi dasarnya sama,
+  hanya jumlah baris per lifecycle yang berbeda; re-sweep adalah kandidat
+  penyempurnaan lanjutan, bukan blocker).
 
 TIDAK reuse (butuh logic baru, didokumentasikan di bawah):
 - Dukungan historis (`part_model_category`/`item_type_at_install_grouped`)
@@ -37,11 +37,11 @@ TIDAK reuse (butuh logic baru, didokumentasikan di bawah):
   menghitung dukungan yang BENAR: jumlah LIFECYCLE (bukan baris landmark)
   dengan installed_on <= observation_on landmark ini.
 
-Fitur DINAMIS TAMBAHAN (hasil `experiments.py` ablation - konfigurasi
-"G_combined_without_device", VAL t0-only RSF 0,7849 -> 0,7954, lihat
-reports/dynamic_ablation.md dan reports/g_without_device.md): degradation
-trend + cumulative physical usage + jendela corrective 60/90 hari, DIHITUNG
-DI `eb_src/dynamic_history.py`, ditempel di sini lewat `attach_dynamic_extra()`.
+Fitur DINAMIS TAMBAHAN (hasil ablation - konfigurasi "G_combined_without_device",
+VAL t0-only RSF 0,7849 -> 0,7954, lihat reports/dynamic_ablation.md dan
+reports/g_without_device.md): degradation trend + cumulative physical usage
++ jendela corrective 60/90 hari, DIHITUNG DI `features/survival/dynamic_history.py`,
+ditempel di sini lewat `attach_dynamic_extra()`.
 
 Fitur DEVICE/TERMINAL (`terminal_type_grouped`, konfigurasi "F_combined_all",
 VAL t0-only 0,8036) - AWALNYA diambil dari schema `analytics` (riset lama),
@@ -51,7 +51,7 @@ sudah direproduksi APA ADANYA sebagai query kanonikal
 `journal.t_item_request_out`/`master.t_mtr_item`/`inventory.t_item`,
 diverifikasi angkanya PERSIS sama dengan schema `analytics` - lihat
 docstring `data_reader.get_terminal_context()`) - production TIDAK lagi
-bergantung ke schema `analytics` sama sekali. Lihat `eb_src/terminal_context.py`.
+bergantung ke schema `analytics` sama sekali. Lihat `features/survival/terminal_context.py`.
 """
 
 from __future__ import annotations
@@ -62,8 +62,7 @@ from sklearn.preprocessing import OneHotEncoder
 
 from partrisk import config
 from partrisk.features import failure as feature_builder
-
-from src import categorical_support  # survival_model/src (parent) - lihat README teknis soal path
+from partrisk.features.survival import categorical_support
 
 CATEGORICAL_FEATURES = [
     "part_model_category",
@@ -82,7 +81,7 @@ _CONFIRMED_FAILURE_COLUMNS = [
 # log_days_since_installation - TIDAK di-drop di sini, lihat docstring modul)
 # minus previous_cycle_lifetime_mean lama (diganti confirmed-failure-only,
 # validasi sama seperti model statis - reports/previous_cycle_audit.md).
-# Kolom dari eb_src/dynamic_history.py (degradation trend + cumulative usage
+# Kolom dari features/survival/dynamic_history.py (degradation trend + cumulative usage
 # + jendela corrective tambahan) - urutan HARUS sama dengan urutan kolom
 # yang dikembalikan tiap fungsi (lihat attach_dynamic_extra() di bawah).
 DYNAMIC_EXTRA_NUMERIC_COLUMNS = [

@@ -19,7 +19,7 @@ from sksurv.metrics import (
     integrated_brier_score,
 )
 
-from . import utils
+from . import curves
 
 HORIZONS_DAYS = [30, 60, 90, 120]
 
@@ -82,8 +82,8 @@ def native_metrics(model, y_train, x_eval, y_eval, risk_sign: int = 1) -> dict:
         result["time_dependent_auc_at_horizon"] = {}
         return result
 
-    times_grid, curves = utils.survival_curve_arrays(model, x_eval)
-    surv_at_horizons = utils.step_eval_matrix(times_grid, curves, horizons)
+    times_grid, curve_values = curves.survival_curve_arrays(model, x_eval)
+    surv_at_horizons = curves.step_eval_matrix(times_grid, curve_values, horizons)
 
     try:
         result["integrated_brier_score"] = float(

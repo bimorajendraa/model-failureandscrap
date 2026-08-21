@@ -1,47 +1,16 @@
-"""Helper kecil dipakai lintas script survival_model: batas split temporal
-berbasis lifecycle, dan pembacaan kurva S(t) hasil model survival.
+"""Kurva survival: dari objek StepFunction scikit-survival ke array yang mudah
+dievaluasi pada usia berapa pun (termasuk umur PART aktif sekarang).
 
-Tidak menyentuh apa pun di luar survival_model/ - hanya membaca config.py
-milik project utama untuk MIN_OBSERVATION_DATE (satu-satunya konstanta yang
-di-reuse di sini, supaya batas bawah data sama dengan model classification).
+Diekstrak dari `survival_model/src/utils.py` (Fase C1 restrukturisasi) -
+bagian batas split temporal (TRAIN/VALIDATION/TEST) pindah ke
+`features/survival/lifecycle.py` (dipakai bersama assign_lifecycle_outcome()
+di file yang sama); logic di sini murni model-agnostic, tidak diubah.
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-
-from partrisk import config
-
-TRAIN, VALIDATION, TEST, EXCLUDED_TOO_OLD = "TRAIN", "VALIDATION", "TEST", "EXCLUDED_TOO_OLD"
-
-
-def lifecycle_split_bounds(data_end: pd.Timestamp) -> tuple[pd.Timestamp, pd.Timestamp]:
-    """Batas VALIDATION/TEST, dihitung dari tahun data_end - formula yang SAMA
-    dengan train.assign_split() di model classification, supaya kedua model
-    diuji pada window kalender yang sama persis."""
-    test_start = pd.Timestamp(year=data_end.year, month=1, day=1)
-    validation_start = test_start - pd.DateOffset(years=1)
-    return validation_start, test_start
-
-
-def assign_lifecycle_split(installed_on: pd.Series, data_end: pd.Timestamp) -> pd.Series:
-    """Split berdasar installed_on (awal lifecycle), bukan observation_on -
-    unit datanya sudah lifecycle-level. Tanpa embargo bergaya classification;
-    lihat README.md bagian "Leakage prevention" untuk alasannya."""
-    validation_start, test_start = lifecycle_split_bounds(data_end)
-    installed_on = pd.to_datetime(installed_on)
-    split = pd.Series(EXCLUDED_TOO_OLD, index=installed_on.index)
-    split[installed_on >= pd.Timestamp(config.MIN_OBSERVATION_DATE)] = TRAIN
-    split[installed_on >= validation_start] = VALIDATION
-    split[installed_on >= test_start] = TEST
-    return split
-
-
-# ---------------------------------------------------------------------------
-# Kurva survival: dari objek StepFunction scikit-survival ke array yang mudah
-# dievaluasi pada usia berapa pun (termasuk umur PART aktif sekarang).
-# ---------------------------------------------------------------------------
 
 
 def survival_curve_arrays(fitted_model, features: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:

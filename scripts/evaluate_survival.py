@@ -1,76 +1,45 @@
-"""Evaluasi model survival event-based - TIGA lapis (bukan dua seperti model
-statis, lihat "Lapis 1b" di bawah untuk alasannya).
+"""Evaluasi model survival event-based - TIGA lapis.
 
-    python survival_model/event_based/evaluate.py
+    python scripts/evaluate_survival.py
 
 Lapis 1 - native FULL LANDMARK: C-index dkk dihitung dari SEMUA baris
 landmark (satu lifecycle bisa menyumbang beberapa baris). Ini metrik
-OPERASIONAL model event-based yang sebenarnya - tapi BUKAN apples-to-apples
-dengan C-index model statis (survival_model/), karena baris-baris landmark
+OPERASIONAL model event-based yang sebenarnya, tapi baris-baris landmark
 satu lifecycle SALING BERKORELASI (repeated measures) - C-index yang dihitung
-naif di atasnya BISA bias optimis (lihat README bagian "Keterbatasan").
+naif di atasnya BISA bias optimis.
 
-Lapis 1b - native T0-ONLY (BARU, TIDAK ada di model statis): subset HANYA
-baris landmark_source=='INSTALL' (SATU baris per lifecycle, age=0) - populasi
-IDENTIK dengan yang dipakai C-index model statis. Ini perbandingan HEAD-TO-HEAD
-yang adil: "kalau model event-based ini HANYA diberi info instalasi (sama
-seperti model statis), seberapa baik dia?" - mengisolasi efek ARSITEKTUR
-(landmark training) dari efek INFORMASI TAMBAHAN (banyak landmark per
-lifecycle) pada C-index akhir.
+Lapis 1b - native T0-ONLY: subset HANYA baris landmark_source=='INSTALL'
+(SATU baris per lifecycle, age=0) - mengisolasi efek ARSITEKTUR (landmark
+training) dari efek INFORMASI TAMBAHAN (banyak landmark per lifecycle) pada
+C-index akhir.
 
-Lapis 2 - operasional vs classification production (SAMA metodologinya
-dengan model statis: `training_utils.full_metrics()` pada populasi TEST
-classification yang dipinjam read-only) - dijalankan pada fitur T0-ONLY
-(satu baris per lifecycle, index=installation_cycle_id) supaya
-`evaluate.score_operational()` (fungsi ASLI model statis, TIDAK diubah)
-bisa dipakai APA ADANYA - fungsi itu butuh index unik per lifecycle.
+Lapis 2 - operasional vs classification production
+(`training.operational_eval.score_operational()`) pada fitur T0-ONLY (satu
+baris per lifecycle) - PERINGATAN: fitur dibekukan di installed_on di sini,
+BUKAN dihitung ulang pada observation_on tiap baris TEST classification
+seperti `training.landmark_eval` (hasil Fase A1) - angka Lapis 2 di bawah
+CENDERUNG menguntungkan model secara tidak sengaja (lihat
+survival_model/event_based/reports/gate_decision.md untuk perbandingan yang
+benar-benar dipakai keputusan gerbang). Dipertahankan di sini sebagai
+diagnostik cepat (tidak perlu membangun dataset classification 1,4 juta
+baris berulang), bukan sebagai dasar keputusan promosi.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
-import sys
-from pathlib import Path
-
-SURVIVAL_DIR = Path(__file__).resolve().parent.parent
-if str(SURVIVAL_DIR) not in sys.path:
-    sys.path.insert(0, str(SURVIVAL_DIR))
-EVENT_BASED_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(EVENT_BASED_DIR))  # lihat catatan di build_dataset.py/train.py
 
 import joblib
 
 from partrisk import config
+from partrisk.features.survival import builder as features
+from partrisk.survival import metrics as evaluation
+from partrisk.survival import model_fit
+from partrisk.training import operational_eval
+from partrisk.training.datasets import survival as build_dataset
 
-from src import evaluation, model_fit
-
-import build_dataset
-from eb_src import features
-
-
-def _load_static_evaluate():
-    """Muat survival_model/evaluate.py (parent) lewat file path, BUKAN
-    `import evaluate` biasa - modul INI SENDIRI juga bernama evaluate.py
-    (event_based/evaluate.py), `import evaluate` akan meng-import DIRINYA
-    SENDIRI (self-import) alih-alih versi statis. `train.py`/`predict.py` di
-    root TIDAK butuh pola ini lagi setelah restrukturisasi src/partrisk/ -
-    keduanya sekarang punya nama qualified unik (`partrisk.train`,
-    `partrisk.predict`), tidak lagi bertabrakan nama bare dengan
-    survival_model/train.py. survival_model/evaluate.py di sini TETAP
-    bertabrakan nama dengan file ini sendiri, jadi trik file-path TETAP
-    perlu - cuma untuk kasus INI."""
-    spec = importlib.util.spec_from_file_location("static_survival_evaluate", SURVIVAL_DIR / "evaluate.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["static_survival_evaluate"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-static_evaluate = _load_static_evaluate()
-
-ARTIFACTS_DIR = EVENT_BASED_DIR / "artifacts"
-REPORTS_DIR = EVENT_BASED_DIR / "reports"
+ARTIFACTS_DIR = config.PACKAGE_DIR / "survival_model" / "event_based" / "artifacts"
+REPORTS_DIR = config.PACKAGE_DIR / "survival_model" / "event_based" / "reports"
 
 
 def load_artifacts() -> dict:
@@ -99,7 +68,7 @@ def _native_by_split(models, encoder, y_train, dataset, feature_frame, mask_by_s
 
 
 def main() -> int:
-    print("[1/4] Memuat artifacts hasil train.py...")
+    print("[1/4] Memuat artifacts hasil training...")
     artifacts = load_artifacts()
     models, encoder, y_train = artifacts["models"], artifacts["encoder"], artifacts["y_train"]
 
@@ -126,17 +95,17 @@ def main() -> int:
             print(f"      [t0-only] {split_name:10s} {model_name:24s} C-index={m['c_index']:.4f}")
 
     print("[4/4] Lapis 2: perbandingan adil dengan classification model production (fitur t0-only)...")
-    test_rows, window_days = static_evaluate.load_classification_test_rows()
+    test_rows, window_days = operational_eval.load_classification_test_rows()
     t0_feature_frame = feature_frame.loc[t0_mask_global].copy()
     t0_feature_frame.index = dataset.loc[t0_mask_global, "installation_cycle_id"].to_numpy()
-    # numeric_columns HARUS diisi eksplisit: static_evaluate.score_operational()
-    # secara default memakai daftar kolom numerik milik features.py STATIS
-    # (survival_model/src/features.py, 14 kolom - TIDAK sama dengan kolom
-    # event-based di sini, mis. log_days_since_installation ada di sini tapi
-    # tidak di statis) - tanpa override ini akan salah kolom/KeyError.
+    # numeric_columns HARUS diisi eksplisit: operational_eval.score_operational()
+    # secara default memakai daftar kolom numerik milik model classification
+    # (14 kolom - TIDAK sama dengan kolom event-based di sini, mis.
+    # log_days_since_installation ada di sini tapi tidak di classification) -
+    # tanpa override ini akan salah kolom/KeyError.
     eb_numeric_columns = features.NUMERIC_FEATURES + features.FLEET_FEATURES
     operational = {
-        name: static_evaluate.score_operational(
+        name: operational_eval.score_operational(
             model, t0_feature_frame, encoder, test_rows, window_days, numeric_columns=eb_numeric_columns
         )
         for name, model in models.items()

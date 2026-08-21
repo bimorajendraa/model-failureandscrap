@@ -34,7 +34,7 @@ murni event organik:
 Keputusan desain PALING PENTING di modul ini: split (TRAIN/VALIDATION/TEST)
 dan cutoff administrative censoring sebuah landmark row ditentukan oleh
 lifecycle induknya (installed_on, SAMA PERSIS dengan model statis lewat
-`lifecycle_builder.assign_lifecycle_outcome()`), BUKAN dihitung ulang dari L
+`lifecycle.assign_lifecycle_outcome()`), BUKAN dihitung ulang dari L
 masing-masing.
 
 Alternatif yang DITOLAK: assign split per-L (misal cycle yang installed_on
@@ -56,7 +56,7 @@ lama (misal 2014) tetap boleh menghasilkan landmark sampai validation_start
 ## Reuse total logika censoring - TIDAK ada aturan baru
 
 `event_observed`/`duration_days` (dari install) untuk sebuah lifecycle
-SUDAH final dari `lifecycle_builder.assign_lifecycle_outcome()` (diimpor
+SUDAH final dari `lifecycle.assign_lifecycle_outcome()` (diimpor
 APA ADANYA, tidak diubah). Landmark HANYA menggeser titik ASAL pengukuran
 durasi dari installed_on ke L:
 
@@ -67,7 +67,7 @@ durasi dari installed_on ke L:
 berlaku selama `age_at_landmark < duration_days` (L terjadi sebelum endpoint
 lifecycle - kalau tidak, L bukan landmark yang valid, dibuang). Tidak ada
 percabangan FAILURE/CENSORED/EXCLUDE baru yang ditulis di sini - itu
-sepenuhnya keputusan `lifecycle_builder.py` yang sudah diaudit.
+sepenuhnya keputusan `lifecycle.py` yang sudah diaudit.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ def _anchor_ages(max_age_days: float, max_anchors: int = MAX_ANCHORS_PER_LIFECYC
 
 
 def build_landmarks(outcome: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame:
-    """`outcome` = HASIL `lifecycle_builder.assign_lifecycle_outcome()`
+    """`outcome` = HASIL `lifecycle.assign_lifecycle_outcome()`
     (SUDAH punya split/cutoff_on/duration_days/event_observed/eligible per
     lifecycle, tidak diubah di sini). `events` = `data_reader.get_events()`.
 
@@ -171,7 +171,7 @@ def build_landmarks(outcome: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame
         final_ages = ages_arr[keep_idx]
         final_sources = np.asarray(sources)[keep_idx]
         # age harus STRICT < duration (residual harus positif, >=1 hari -
-        # konsisten dengan invarian duration_days >= 1.0 di lifecycle_builder).
+        # konsisten dengan invarian duration_days >= 1.0 di lifecycle.py).
         valid = final_ages < max_age
         rows_ages.append(final_ages[valid])
         rows_source.append(final_sources[valid])

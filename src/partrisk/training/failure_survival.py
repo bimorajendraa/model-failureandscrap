@@ -1,44 +1,35 @@
 """Latih model survival event-based (RSF + Cox PH) pada landmark PART.
 
-    python survival_model/event_based/train.py
+    python -m partrisk.training.failure_survival
 
-Reuse TOTAL logic fitting/evaluasi native dari model statis
-(`survival_model/src/model_fit.py`, `evaluation.py` - TIDAK diubah, TIDAK
-disalin) - satu-satunya yang beda dari train.py statis adalah SUMBER
-datanya (`event_based/build_dataset.py`, banyak baris/lifecycle) dan
-encoder/fitur (`eb_src/features.py`, kolom categorical/numeric berbeda karena
-umur pemasangan sekarang jadi fitur, bukan sumbu waktu konstan).
+Reuse TOTAL logic fitting/evaluasi native dari `survival.model_fit` (TIDAK
+diubah, TIDAK disalin) - satu-satunya yang beda dari model classification
+adalah sumber datanya (`training.datasets.survival`, banyak baris/lifecycle
+per lifecycle) dan encoder/fitur (`features.survival.builder`, kolom
+categorical/numeric berbeda karena umur pemasangan sekarang jadi fitur,
+bukan sumbu waktu konstan).
+
+BELUM menulis models/failure/v3/ (mode aditif - lihat gate_decision.md,
+model ini TIDAK menggantikan CatBoost). ARTIFACTS_DIR SEMENTARA masih
+menunjuk artifact riset (survival_model/event_based/artifacts/) - konfigurasi
+di sini MASIH konfigurasi riset penuh (5,26 GB), BELUM konfigurasi compact
+pemenang Fase A2 (lihat survival_model/event_based/reports/gate_a2_compact_model.md) -
+itu perubahan PERILAKU terpisah, bukan bagian dari pemindahan mekanis ini.
 """
 
 from __future__ import annotations
 
 import json
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
-
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-if str(ROOT_DIR) not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR))
-SURVIVAL_DIR = Path(__file__).resolve().parent.parent
-if str(SURVIVAL_DIR) not in sys.path:
-    sys.path.insert(0, str(SURVIVAL_DIR))
-EVENT_BASED_DIR = Path(__file__).resolve().parent
-# TANPA guard "not in sys.path" - lihat catatan di build_dataset.py: skrip
-# ini sendiri sudah otomatis ada di sys.path[0] SEBELUM baris ini jalan,
-# guard akan melewatkan insert dan membuat SURVIVAL_DIR salah menang urutan
-# resolusi modul (import build_dataset akan ambil survival_model/
-# build_dataset.py yang statis, nama modul sama).
-sys.path.insert(0, str(EVENT_BASED_DIR))
 
 import joblib
 
-import build_dataset
-from src import model_fit
+from partrisk import config
+from partrisk.features.survival import builder as features
+from partrisk.survival import model_fit
+from partrisk.training.datasets import survival as build_dataset
 
-from eb_src import features
-
-ARTIFACTS_DIR = EVENT_BASED_DIR / "artifacts"
+ARTIFACTS_DIR = config.PACKAGE_DIR / "survival_model" / "event_based" / "artifacts"
 
 
 def main() -> int:
@@ -88,12 +79,12 @@ def main() -> int:
         "unit_of_observation": (
             "one row per (lifecycle, landmark) - features/age RE-ANCHORED at each landmark's "
             "observation_on (install / organic operational event / sparse 90-365d anchor), "
-            "NOT frozen at installed_on like the static model (survival_model/)"
+            "NOT frozen at installed_on like a baseline-installation model"
         ),
         "target": "duration_days (residual time from landmark's observation_on to failure/censoring), event_observed",
         "landmark_design": {
             "sources": ["INSTALL (age=0, always)", "ORGANIC_EVENT (operational event mid-cycle)", "ANCHOR (90/180/365d then +365d, capped)"],
-            "split_assignment": "follows the LIFECYCLE's installed_on (NOT per-landmark L) - see eb_src/landmark_builder.py docstring",
+            "split_assignment": "follows the LIFECYCLE's installed_on (NOT per-landmark L) - see features/survival/landmarks.py docstring",
         },
         "feature_columns": features.FEATURE_COLUMNS,
         "categorical_features": features.CATEGORICAL_FEATURES,
@@ -116,8 +107,8 @@ def main() -> int:
     print(f"      Tersimpan di {ARTIFACTS_DIR}")
     print()
     print("      PERINGATAN: C-index di atas dihitung dari SEMUA baris landmark (repeated")
-    print("      measures per lifecycle - BUKAN apples-to-apples dengan C-index model statis).")
-    print("      Jalankan evaluate.py untuk perbandingan t0-only yang adil.")
+    print("      measures per lifecycle - BUKAN apples-to-apples dengan populasi t0-only).")
+    print("      Jalankan scripts/evaluate_survival.py untuk perbandingan t0-only yang adil.")
     return 0
 
 

@@ -17,6 +17,12 @@ batas SPLIT-nya sendiri (validation_start untuk TRAIN, test_start untuk
 VALIDATION, data_end untuk TEST), dihitung ulang dari fakta yang sudah ada
 di `cycle_end_on`/`failure_onset_on` - bukan exclude berbasis embargo seperti
 classification, karena durasi survival tidak punya window tetap.
+
+Batas split (TRAIN/VALIDATION/TEST) - dulu `survival_model/src/utils.py`,
+digabung ke sini (Fase C1 restrukturisasi) karena assign_lifecycle_outcome()
+di bawah adalah SATU-SATUNYA pemanggilnya di luar landmark-splitting
+(features/survival/landmarks.py yang mengikuti split LIFECYCLE, bukan
+menghitung sendiri - lihat docstring di sana).
 """
 
 from __future__ import annotations
@@ -24,7 +30,32 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from . import utils
+from partrisk import config
+
+TRAIN, VALIDATION, TEST, EXCLUDED_TOO_OLD = "TRAIN", "VALIDATION", "TEST", "EXCLUDED_TOO_OLD"
+
+
+def lifecycle_split_bounds(data_end: pd.Timestamp) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Batas VALIDATION/TEST, dihitung dari tahun data_end - formula yang SAMA
+    dengan train.assign_split() di model classification, supaya kedua model
+    diuji pada window kalender yang sama persis."""
+    test_start = pd.Timestamp(year=data_end.year, month=1, day=1)
+    validation_start = test_start - pd.DateOffset(years=1)
+    return validation_start, test_start
+
+
+def assign_lifecycle_split(installed_on: pd.Series, data_end: pd.Timestamp) -> pd.Series:
+    """Split berdasar installed_on (awal lifecycle), bukan observation_on -
+    unit datanya sudah lifecycle-level. Tanpa embargo bergaya classification;
+    lihat README.md bagian "Leakage prevention" untuk alasannya."""
+    validation_start, test_start = lifecycle_split_bounds(data_end)
+    installed_on = pd.to_datetime(installed_on)
+    split = pd.Series(EXCLUDED_TOO_OLD, index=installed_on.index)
+    split[installed_on >= pd.Timestamp(config.MIN_OBSERVATION_DATE)] = TRAIN
+    split[installed_on >= validation_start] = VALIDATION
+    split[installed_on >= test_start] = TEST
+    return split
+
 
 # Kolom yang wajib ada di `cycles` (dari data_reader.get_cycles()).
 _REQUIRED_COLUMNS = [
@@ -69,12 +100,12 @@ def assign_lifecycle_outcome(cohort: pd.DataFrame, data_end: pd.Timestamp) -> pd
             selain itu: EXCLUDE - status pada cutoff tidak bisa dipastikan
     """
     outcome = cohort.copy()
-    outcome["split"] = utils.assign_lifecycle_split(outcome["installed_on"], data_end)
-    validation_start, test_start = utils.lifecycle_split_bounds(data_end)
+    outcome["split"] = assign_lifecycle_split(outcome["installed_on"], data_end)
+    validation_start, test_start = lifecycle_split_bounds(data_end)
     cutoff_by_split = {
-        utils.TRAIN: validation_start,
-        utils.VALIDATION: test_start,
-        utils.TEST: pd.Timestamp(data_end),
+        TRAIN: validation_start,
+        VALIDATION: test_start,
+        TEST: pd.Timestamp(data_end),
     }
     outcome["cutoff_on"] = outcome["split"].map(cutoff_by_split)
 

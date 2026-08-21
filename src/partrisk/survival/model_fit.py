@@ -1,16 +1,16 @@
 """Fit model survival + evaluasi native, lewat registry keluarga model.
 
-Diekstrak dari train.py supaya `experiments.py` (puluhan model kandidat:
-ablation, threshold sweep, tuning) memakai logic fitting/evaluasi yang SAMA
-PERSIS dengan model production - tidak ada logic yang di-duplikasi/berbeda
-antara eksperimen dan hasil akhir.
+Awalnya diekstrak dari skrip training model statis supaya eksperimen
+(ablation, threshold sweep, tuning - lineage statis itu sendiri sudah
+dihapus, lihat gate_decision.md, event-based menang di semua metrik
+operasional) memakai logic fitting/evaluasi yang SAMA PERSIS dengan model
+production - prinsip itu tetap berlaku untuk event-based sekarang.
 
 `MODEL_REGISTRY` diperluas (sesi peningkatan C-index) dari RSF+Cox saja
 menjadi 6 keluarga model - tapi `fit_models()`/`evaluate_models()` TETAP
 kompatibel dengan pemanggilan lama (`fit_models(x_train, y_train)` tanpa
-argumen lain) karena `DEFAULT_MODEL_NAMES` tetap RSF+Cox, sama seperti
-sebelumnya. train.py TIDAK berubah perilakunya sampai konfigurasi baru
-benar-benar terpilih dari VALIDATION (lihat reports/model_family.md).
+argumen lain) karena `DEFAULT_MODEL_NAMES` tetap RSF+Cox (lihat
+reports/model_family.md).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from sksurv.ensemble import (
 from sksurv.linear_model import CoxPHSurvivalAnalysis
 from sksurv.util import Surv
 
-from . import evaluation
+from . import metrics as evaluation
 
 # Titik awal (dipakai train.py apa adanya kalau tidak ada override) - hasil
 # sesi sebelumnya: pembulatan duration_days ke hari bulat + min_samples_leaf
@@ -72,7 +72,7 @@ DEFAULT_COMPONENTWISE_GBSA_PARAMS = dict(loss="coxph", n_estimators=100, random_
 
 # risk_sign dikalikan ke model.predict() sebelum masuk ke
 # concordance_index_censored/ipcw & cumulative_dynamic_auc
-# (src/evaluation.native_metrics) - SEMUA model harus dibandingkan dengan
+# (survival/metrics.native_metrics) - SEMUA model harus dibandingkan dengan
 # konvensi yang sama "skor lebih tinggi = lebih berisiko/lebih cepat gagal".
 # RSF/ExtraSurvivalTrees ("total kejadian" dari cumulative hazard) dan Cox PH
 # (log hazard ratio) serta GradientBoostingSurvivalAnalysis/Componentwise
@@ -82,7 +82,7 @@ DEFAULT_COMPONENTWISE_GBSA_PARAMS = dict(loss="coxph", n_estimators=100, random_
 # SEMPAT diuji sebelum dibuang karena alasan lain, lihat catatan di bawah
 # DEFAULT_COMPONENTWISE_GBSA_PARAMS - kalau suatu saat model AFT-style
 # ditambahkan lagi, risk_sign adalah tempatnya, bukan pembalikan ad-hoc di
-# evaluation.py).
+# survival/metrics.py).
 MODEL_REGISTRY = {
     "random_survival_forest": {
         "cls": RandomSurvivalForest, "default_params": DEFAULT_RSF_PARAMS, "risk_sign": 1,
@@ -139,9 +139,9 @@ def fit_models(
 
 def evaluate_models(models: dict, y_train, x_val, y_val, x_test=None, y_test=None) -> dict:
     """Metrik native (C-index Harrell & Uno, IBS, Brier/AUC per horizon)
-    lewat src.evaluation.native_metrics() - SATU fungsi dipakai train.py,
-    evaluate.py, dan experiments.py, supaya angka antar tahap selalu
-    dihitung dengan cara yang identik. risk_sign per model diambil dari
+    lewat survival.metrics.native_metrics() - SATU fungsi dipakai seluruh
+    tahap training/evaluasi, supaya angka antar tahap selalu dihitung
+    dengan cara yang identik. risk_sign per model diambil dari
     MODEL_REGISTRY (lihat catatan di atas MODEL_REGISTRY) - model yang tidak
     terdaftar (seharusnya tidak terjadi lewat fit_models()) dianggap
     risk_sign=1."""

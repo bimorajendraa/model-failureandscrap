@@ -1,8 +1,8 @@
 {
-  "training_date": "2026-08-21T05:05:29.897159+00:00",
+  "training_date": "2026-08-21T14:22:15.670130+00:00",
   "data_end": "2026-08-03 11:07:22",
   "primary_model": "random_survival_forest",
-  "unit_of_observation": "one row per (lifecycle, landmark) - features/age RE-ANCHORED at each landmark's observation_on (install / organic operational event / sparse 90-365d anchor), NOT frozen at installed_on like the static model (survival_model/)",
+  "unit_of_observation": "one row per (lifecycle, landmark) - features/age RE-ANCHORED at each landmark's observation_on (install / organic operational event / sparse 90-365d anchor), NOT frozen at installed_on like a baseline-installation model",
   "target": "duration_days (residual time from landmark's observation_on to failure/censoring), event_observed",
   "landmark_design": {
     "sources": [
@@ -10,7 +10,7 @@
       "ORGANIC_EVENT (operational event mid-cycle)",
       "ANCHOR (90/180/365d then +365d, capped)"
     ],
-    "split_assignment": "follows the LIFECYCLE's installed_on (NOT per-landmark L) - see eb_src/landmark_builder.py docstring"
+    "split_assignment": "follows the LIFECYCLE's installed_on (NOT per-landmark L) - see features/survival/landmarks.py docstring"
   },
   "feature_columns": [
     "part_model_category",
@@ -236,8 +236,8 @@
         ],
         "integrated_brier_score": 0.05088881845427292,
         "brier_at_horizon": {
-          "30": 0.048732548889088775,
-          "60": 0.05094329109745243,
+          "30": 0.04873254888908878,
+          "60": 0.05094329109745244,
           "90": 0.051879914706527974,
           "120": 0.050953950228587945
         },
