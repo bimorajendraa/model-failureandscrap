@@ -120,22 +120,23 @@ def load_classification_test_rows() -> tuple:
     return test_rows, window_days
 
 
-def score_operational(
-    model, feature_frame_by_cycle_id: pd.DataFrame, encoder, test_rows: pd.DataFrame, window_days: float,
+def compute_risk_30d(
+    model, feature_frame_by_cycle_id: pd.DataFrame, encoder, test_rows: pd.DataFrame,
     *, numeric_columns: list[str] | None = None,
-) -> dict | None:
-    """Skor SATU model survival pada populasi TEST classification yang
-    dipinjam `load_classification_test_rows()` - `training_utils.full_metrics()`
-    yang SAMA PERSIS dipakai `train.py` classification. Dipisah dari
-    `classification_layer()` supaya `experiments.py` bisa memanggilnya
-    berulang untuk banyak model kandidat tanpa membangun ulang `test_rows`.
+) -> tuple[pd.DataFrame, np.ndarray, np.ndarray] | None:
+    """Skor MENTAH (risk_30d per baris, BELUM diringkas jadi metrik) SATU
+    model survival pada populasi TEST classification. Diekstrak dari
+    `score_operational()` (yang tetap dipertahankan APA ADANYA untuk
+    caller lama) supaya skor mentah ANTAR MODEL bisa digabung (ensemble)
+    SEBELUM dihitung metriknya - lihat `ensemble_operational.py`
+    (survival_model/event_based/) untuk pemakaiannya.
 
-    `feature_frame_by_cycle_id` = fitur baseline instalasi, index-nya
-    `installation_cycle_id` (satu baris per lifecycle unik).
-    """
+    Return `(rows, risk_30d, target)` - `rows` (subset `test_rows` yang
+    matched) dipakai caller untuk join ANTAR model lewat
+    `installation_cycle_id` (urutan baris BEDA-BEDA antar model kalau
+    populasi matched-nya beda, TIDAK boleh digabung by POSITION)."""
     matched_mask = test_rows["installation_cycle_id"].isin(feature_frame_by_cycle_id.index)
-    n_total, n_matched = len(test_rows), int(matched_mask.sum())
-    if n_matched == 0:
+    if int(matched_mask.sum()) == 0:
         return None
     rows = test_rows.loc[matched_mask]
     ages = pd.to_numeric(rows["days_since_installation"], errors="coerce").to_numpy()
@@ -158,11 +159,31 @@ def score_operational(
             for cid, age in zip(rows["installation_cycle_id"].to_numpy(), ages)
         ]
     )
+    return rows, risk_30d, target
+
+
+def score_operational(
+    model, feature_frame_by_cycle_id: pd.DataFrame, encoder, test_rows: pd.DataFrame, window_days: float,
+    *, numeric_columns: list[str] | None = None,
+) -> dict | None:
+    """Skor SATU model survival pada populasi TEST classification yang
+    dipinjam `load_classification_test_rows()` - `training_utils.full_metrics()`
+    yang SAMA PERSIS dipakai `train.py` classification. Dipisah dari
+    `classification_layer()` supaya `experiments.py` bisa memanggilnya
+    berulang untuk banyak model kandidat tanpa membangun ulang `test_rows`.
+
+    `feature_frame_by_cycle_id` = fitur baseline instalasi, index-nya
+    `installation_cycle_id` (satu baris per lifecycle unik).
+    """
+    computed = compute_risk_30d(model, feature_frame_by_cycle_id, encoder, test_rows, numeric_columns=numeric_columns)
+    if computed is None:
+        return None
+    rows, risk_30d, target = computed
     metrics = training_utils.full_metrics(
         risk_30d, risk_30d, target, window_days, config.FAILURE_CAPACITY_PER_MONTH
     )
-    metrics["rows_matched"] = n_matched
-    metrics["rows_total_classification_test"] = n_total
+    metrics["rows_matched"] = len(rows)
+    metrics["rows_total_classification_test"] = len(test_rows)
     return metrics
 
 

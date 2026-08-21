@@ -520,6 +520,78 @@ ORDER BY item_identifier_clean, created_on, journey_id
         return _query(conn, sql, () if item_id is None else (_normalize(item_id),))
 
 
+def get_terminal_context(item_id: str | None = None) -> pd.DataFrame:
+    """PART -> TERMINAL parent link PERSIS pada event INSTALLED yang membuka
+    tiap siklus. TIDAK dipakai model classification/survival statis manapun
+    (fitur eksperimental, dibaca hanya oleh `survival_model/event_based/`) -
+    fungsi terpisah, TIDAK menyentuh `get_cycles()`/`get_events()`.
+
+    Dibangun ulang dari tabel MENTAH (`journal.t_item_request_out`,
+    `master.t_mtr_item`, `inventory.t_item`) - MEKANISME IDENTIK dengan view
+    riset `analytics.eda_part_terminal_cycle_link` (dibaca definisinya lewat
+    `pg_get_viewdef` untuk memastikan reproduksi ini benar, BUKAN ditebak):
+    setiap PART yang diminta keluar gudang (`t_item_request_out`) dicatat
+    `parent_serial_code`-nya (device tempat PART itu akan dipasang) - baris
+    itu dicocokkan ke event INSTALLED lewat (`host_serial_code`, `wo_code`)
+    yang SAMA. `parent_serial_code` berformat `MODEL-PAIRING-REPAIR_SEQ`;
+    bagian MODEL dicocokkan ke `master.t_mtr_item` (kategori/tipe resmi),
+    bagian PAIRING diverifikasi benar-benar ada di `inventory.t_item` -
+    relasi hanya dianggap valid kalau KEDUANYA cocok DAN kategorinya
+    'TERMINAL' (`parent_link_quality_status`).
+
+    **Point-in-time**: `parent_link_quality_status='VALID_POINT_IN_TIME_RELATION'`
+    HANYA kalau baris `t_item_request_out` itu sendiri tercatat PADA ATAU
+    SEBELUM instalasi (`r.created_on <= installed_on`) - kalau baru tercatat
+    SETELAHNYA (`VALID_RELATION_RECORDED_AFTER_INSTALLATION`, ~43% populasi
+    pada audit awal), relasi itu TIDAK boleh dipakai sebagai fitur di
+    `observation_on=installed_on` (baru "diketahui" belakangan) - pemanggil
+    WAJIB menyaring status ini sebelum memakai `terminal_type_clean`/
+    `terminal_model_name_clean` sebagai fitur, TIDAK dilakukan di sini
+    supaya kebijakan penyaringan tetap eksplisit di kode pemanggil.
+    """
+    with connect() as conn:
+        client_map, place_map = _build_text_maps(conn)
+        sql = (
+            _chain_sql(client_map, place_map, single_item=item_id is not None)
+            + f"""
+, parent_link AS MATERIALIZED (
+    SELECT
+        o.journey_id, o.item_identifier_clean, o.created_on AS installed_on,
+        r.created_on AS parent_link_recorded_on,
+        {_clean("split_part(" + _clean('r.parent_serial_code') + ", '-', 1)")} AS terminal_model_code_clean,
+        {_clean('pm.item_category')} AS terminal_parent_category_clean,
+        {_clean('pm.item_type')} AS terminal_type_clean,
+        {_clean('pm.item_model_name')} AS terminal_model_name_clean,
+        ti.item_id AS terminal_inventory_item_id,
+        CASE
+            WHEN r.item_request_out_id IS NULL THEN 'UNMATCHED_INSTALLATION_REQUEST'
+            WHEN NULLIF(BTRIM(r.parent_serial_code), '') IS NULL THEN 'MISSING_PARENT_SERIAL'
+            WHEN {_clean('pm.item_category')} IS DISTINCT FROM 'TERMINAL' THEN 'PARENT_NOT_TERMINAL'
+            WHEN ti.item_id IS NULL THEN 'PARENT_TERMINAL_NOT_IN_INVENTORY'
+            WHEN r.created_on > o.created_on THEN 'VALID_RELATION_RECORDED_AFTER_INSTALLATION'
+            ELSE 'VALID_POINT_IN_TIME_RELATION'
+        END AS parent_link_quality_status
+    FROM operational o
+    LEFT JOIN journal.t_item_request_out r
+        ON {_clean('r.item_serial_code_out')} = o.host_serial_code_clean
+       AND {_clean('r.wo_code')} = o.wo_code_clean
+    LEFT JOIN master.t_mtr_item pm
+        ON pm.item_model_code = {_clean("split_part(" + _clean('r.parent_serial_code') + ", '-', 1)")}
+    LEFT JOIN inventory.t_item ti
+        ON ti.item_pairing_code = {_clean("split_part(" + _clean('r.parent_serial_code') + ", '-', 2)")}
+    WHERE o.status_clean = 'INSTALLED'
+      AND o.item_category_clean = 'PART'
+      AND o.item_identifier_clean IS NOT NULL
+)
+SELECT journey_id, item_identifier_clean, installed_on, terminal_model_code_clean,
+    terminal_type_clean, terminal_model_name_clean, parent_link_quality_status
+FROM parent_link
+ORDER BY item_identifier_clean, installed_on, journey_id
+"""
+        )
+        return _query(conn, sql, () if item_id is None else (_normalize(item_id),))
+
+
 def get_cycles(
     item_id: str | None = None, dataset_max_event_on: pd.Timestamp | None = None
 ) -> pd.DataFrame:

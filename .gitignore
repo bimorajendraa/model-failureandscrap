@@ -4,3 +4,5 @@ __pycache__/
 catboost_info/
 .pytest_cache/
 .cache/
+survival_model/**/artifacts/*.joblib
+survival_model/**/artifacts/_experiment_cache/

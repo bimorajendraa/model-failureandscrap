@@ -10,10 +10,12 @@ masing-masing HANYA dibaca SEKALI di awal - seluruh eksperimen berikutnya
 bekerja in-memory dari situ (lihat README bagian "Efisiensi eksperimen").
 
 Menulis:
+    reports/uncertainty_baseline.md  (langkah 0, sesi peningkatan C-index)
     reports/category_threshold.md   (langkah 3 instruksi)
     reports/feature_ablation.md      (langkah 4-5)
     reports/previous_cycle_audit.md   (langkah 6)
     reports/model_comparison.md        (langkah 8-9, RSF vs Cox + tuning)
+    reports/model_family.md             (langkah tambahan, sesi peningkatan C-index)
 
 Tidak menyimpan model kandidat ke artifacts/ - itu tetap tugas train.py,
 dijalankan ulang SETELAH konfigurasi final diketahui dari sini.
@@ -39,9 +41,10 @@ import feature_builder
 
 import build_dataset
 import evaluate
-from src import categorical_support, features, install_context, model_fit, previous_cycle
+from src import categorical_support, evaluation, features, hazard_features, install_context, model_fit, previous_cycle
 
 REPORTS_DIR = SURVIVAL_DIR / "reports"
+ARTIFACTS_DIR = SURVIVAL_DIR / "artifacts"
 CACHE_DIR = SURVIVAL_DIR / "artifacts" / "_experiment_cache"
 THRESHOLD_CANDIDATES = [20, 50, 100, 200, 300]
 LIGHT_RSF_PARAMS = dict(
@@ -85,13 +88,19 @@ def prepare_base_data(with_operational: bool = False) -> dict:
 
     print("[persiapan] Audit previous-cycle (confirmed-failure-only, last-confirmed)...")
     pc = previous_cycle.audit_previous_cycle_features(built["cycles"])
-    pc_cols = [
-        "installation_cycle_id",
-        "last_confirmed_failure_lifetime",
-        "previous_cycle_end_reason",
-    ]
-    if "previous_cycle_confirmed_failure_lifetime_mean" not in observations.columns:
-        pc_cols.append("previous_cycle_confirmed_failure_lifetime_mean")
+    # Kolom mana yang BELUM ada di observations - build_dataset.build()
+    # SEKARANG sudah menempelkan previous_cycle_confirmed_failure_lifetime_mean
+    # DAN last_confirmed_failure_lifetime secara native (lewat
+    # features.attach_final_context(), fitur ini sendiri hasil eksperimen
+    # sesi sebelumnya). Merge TANPA guard ini menghasilkan kolom bentrok
+    # (_x/_y, karena kedua sisi sudah punya nama yang sama) yang membuat
+    # transform_for_model() gagal KeyError - bukan cuma soal previous_cycle_
+    # confirmed_failure_lifetime_mean seperti guard lama, last_confirmed_
+    # failure_lifetime butuh guard yang SAMA.
+    pc_cols = ["installation_cycle_id", "previous_cycle_end_reason"]
+    for column in ("previous_cycle_confirmed_failure_lifetime_mean", "last_confirmed_failure_lifetime"):
+        if column not in observations.columns:
+            pc_cols.append(column)
     observations = observations.merge(pc[pc_cols], on="installation_cycle_id", how="left")
     prev_transform = previous_cycle.transform_for_model(observations)
     new_transform_cols = [c for c in prev_transform.columns if c not in observations.columns]
@@ -146,13 +155,24 @@ def run_config(
     *,
     rsf_params: dict | None = None,
     cox_params: dict | None = None,
+    model_names: list[str] | None = None,
+    model_params: dict[str, dict] | None = None,
     with_operational: bool = False,
     cache_key: str | None = None,
 ) -> dict:
-    """Fit RSF + Cox PH pada satu kombinasi fitur, evaluasi VAL/TEST native +
-    (opsional) operasional 30-hari vs classification - satu fungsi dipakai
-    threshold experiment, ablation, previous-cycle audit, dan RSF tuning,
-    supaya keempatnya benar-benar memakai dataset/split/censoring yang sama.
+    """Fit satu atau lebih model (dari src.model_fit.MODEL_REGISTRY) pada satu
+    kombinasi fitur, evaluasi VAL/TEST native + (opsional) operasional
+    30-hari vs classification - satu fungsi dipakai threshold experiment,
+    ablation, previous-cycle audit, RSF tuning, DAN model-family experiment,
+    supaya semuanya benar-benar memakai dataset/split/censoring yang sama.
+
+    Dua cara memilih model, TIDAK bisa dicampur dalam satu panggilan:
+    - `rsf_params`/`cox_params` (API LAMA, dipertahankan apa adanya supaya
+      seluruh pemanggilan yang SUDAH ADA - threshold/ablation/previous-cycle/
+      RSF tuning - tetap berjalan identik tanpa perubahan): selalu RSF+Cox.
+    - `model_names`/`model_params` (BARU, dipakai run_model_family()):
+      daftar model bebas dari MODEL_REGISTRY, dengan override hyperparameter
+      opsional per model.
 
     `cache_key`: kalau diisi, hasil METRIK (bukan model - tidak dibutuhkan
     lagi setelah metriknya diambil, lihat result_row()) disimpan ke
@@ -167,15 +187,29 @@ def run_config(
             print(f"      [cache] {label}")
             return cached
 
-    # n_jobs DIPAKSA 1: train.py sendiri (satu kali fit per proses) aman
+    # n_jobs DIPAKSA 1 untuk SETIAP model yang punya param itu (RSF,
+    # ExtraSurvivalTrees): train.py sendiri (satu kali fit per proses) aman
     # dengan n_jobs=-1, tapi experiments.py melakukan puluhan fit BERURUTAN
     # dalam SATU proses panjang - loky (worker pool joblib) terbukti bisa
     # macet total tanpa error setelah beberapa siklus buat/bongkar pool di
     # sandbox ini (gejala yang sama dengan hang predict_survival_function
     # pada model ter-unpickle, lihat evaluate.py). Lebih lambat per fit,
     # tapi selesai - dan dataset ~15rb baris cukup kecil sehingga dampaknya
-    # kecil.
-    rsf_params = {**(rsf_params or model_fit.DEFAULT_RSF_PARAMS), "n_jobs": 1}
+    # kecil. Model boosting (GBSA/Componentwise) tidak punya n_jobs sama
+    # sekali (sekuensial by design) - tidak terpengaruh masalah ini.
+    if model_names is None:
+        names = ["random_survival_forest", "cox_ph"]
+        overrides = {
+            "random_survival_forest": {**(rsf_params or model_fit.DEFAULT_RSF_PARAMS), "n_jobs": 1},
+        }
+        if cox_params is not None:
+            overrides["cox_ph"] = cox_params
+    else:
+        names = model_names
+        overrides = {}
+        for name in names:
+            base = (model_params or {}).get(name, model_fit.MODEL_REGISTRY[name]["default_params"])
+            overrides[name] = {**base, "n_jobs": 1} if "n_jobs" in base else base
 
     train_mask, val_mask, test_mask = masks["TRAIN"], masks["VALIDATION"], masks["TEST"]
 
@@ -187,7 +221,7 @@ def run_config(
     y_val = model_fit.make_survival_target(dataset, val_mask)
     y_test = model_fit.make_survival_target(dataset, test_mask)
 
-    models = model_fit.fit_models(x_train, y_train, rsf_params, cox_params)
+    models = model_fit.fit_models(x_train, y_train, names, overrides)
     native = model_fit.evaluate_models(models, y_train, x_val, y_val, x_test, y_test)
 
     operational = {}
@@ -659,6 +693,276 @@ def run_rsf_tuning(ctx: dict, final_features: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Langkah 0 (sesi peningkatan C-index): ketidakpastian baseline. VALIDATION
+# hanya 385 event (metadata.json) - C-index sebagai satu angka tunggal bisa
+# menyesatkan soal seberapa jauh dua kandidat BENAR-BENAR berbeda. Dijalankan
+# SEBELUM eksperimen model-family/fitur baru berikutnya supaya ada rentang
+# pembanding eksplisit: kandidat baru hanya dianggap menang kalau naik DI
+# LUAR interval ini, bukan menang tipis 0,001 yang bisa jadi murni noise
+# resampling. Dipisah dari langkah 3-8 (threshold/ablation/previous-cycle/
+# tuning di atas) karena bekerja pada artifact PRODUKSI yang SUDAH dilatih
+# (train.py), bukan kandidat baru - tidak butuh chosen_thresholds/ablation/
+# tuning apa pun sebagai input.
+# ---------------------------------------------------------------------------
+
+
+def run_uncertainty_baseline(ctx: dict, n_seeds: int = 5) -> dict:
+    print("\n[ketidakpastian] Bootstrap CI C-index (model produksi saat ini) + variasi seed RSF...")
+    dataset, masks = ctx["dataset"], ctx["masks"]
+    feature_frame = ctx["features"]  # fitur FINAL produksi (src/features.py)
+
+    models = joblib.load(ARTIFACTS_DIR / "models.joblib")
+    for model in models.values():
+        # Alasan sama seperti evaluate.py load_artifacts(): predict_survival_
+        # function() pada RSF ter-unpickle dengan n_jobs=-1 terbukti hang.
+        if hasattr(model, "n_jobs"):
+            model.n_jobs = 1
+    encoder = joblib.load(ARTIFACTS_DIR / "encoder.joblib")
+    y_train = joblib.load(ARTIFACTS_DIR / "y_train.joblib")
+
+    val_mask = masks["VALIDATION"]
+    x_val = features.encode(feature_frame.loc[val_mask], encoder)
+    y_val = model_fit.make_survival_target(dataset, val_mask)
+
+    bootstrap_rows: list[dict] = []
+    for name, model in models.items():
+        risk_sign = model_fit.MODEL_REGISTRY.get(name, {}).get("risk_sign", 1)
+        ci = evaluation.bootstrap_c_index(model, y_train, x_val, y_val, risk_sign=risk_sign, n_boot=200, seed=42)
+        bootstrap_rows.append({"model": name, **ci})
+        print(
+            f"      {name:24s} VAL C-index={ci['point_estimate']:.4f}  "
+            f"95% CI=[{ci['ci_lower_2_5']:.4f}, {ci['ci_upper_97_5']:.4f}]  std={ci['std']:.4f}"
+        )
+
+    # Variasi antar random_state RSF (fitur & hyperparameter TETAP sama,
+    # hanya seed acak yang beda) - sumber ketidakpastian KEDUA, terpisah dari
+    # bootstrap baris di atas (yang model-nya tetap, baris eval yang berubah).
+    train_mask = masks["TRAIN"]
+    x_train = features.encode(feature_frame.loc[train_mask], encoder)
+    seed_rows: list[dict] = []
+    for seed in range(n_seeds):
+        rsf_params = {**model_fit.DEFAULT_RSF_PARAMS, "n_jobs": 1, "random_state": seed}
+        model = model_fit.MODEL_REGISTRY["random_survival_forest"]["cls"](**rsf_params).fit(x_train, y_train)
+        native = evaluation.native_metrics(model, y_train, x_val, y_val)
+        seed_rows.append({"seed": seed, "val_c_index": native["c_index"]})
+        print(f"      RSF seed={seed} VAL C-index={native['c_index']:.4f}")
+
+    seed_values = np.array([r["val_c_index"] for r in seed_rows])
+
+    report = ["# Ketidakpastian baseline C-index (sebelum eksperimen model-family/fitur baru)", ""]
+    report.append(
+        f"VALIDATION: {int(val_mask.sum())} baris, "
+        f"{int(dataset.loc[val_mask, 'event_observed'].sum())} event - kecil, jadi C-index titik "
+        "tunggal bisa menyesatkan. Dua sumber ketidakpastian diukur terpisah: (1) bootstrap resampling "
+        "baris VAL pada model produksi SAAT INI (model tidak berubah, hanya baris mana yang masuk "
+        "perhitungan C-index yang berubah), (2) variasi antar random_state RSF (model berubah, baris "
+        "VAL tetap). Kandidat model/fitur baru pada langkah berikutnya (model_family.md dst.) HANYA "
+        "dianggap menang kalau VAL C-index-nya di LUAR rentang berikut, bukan menang tipis di dalam "
+        "noise ini."
+    )
+    report.append("")
+    report.append("## Bootstrap CI (200 resample, model produksi saat ini)")
+    report.append("| Model | Point estimate | 95% CI lower | 95% CI upper | Std |")
+    report.append("|---|---|---|---|---|")
+    for row in bootstrap_rows:
+        report.append(
+            f"| {row['model']} | {row['point_estimate']:.4f} | {row['ci_lower_2_5']:.4f} | "
+            f"{row['ci_upper_97_5']:.4f} | {row['std']:.4f} |"
+        )
+    report.append("")
+    report.append(f"## Variasi antar seed RSF ({n_seeds} seed, hyperparameter & fitur sama)")
+    report.append("| Seed | VAL C-index |")
+    report.append("|---|---|")
+    for row in seed_rows:
+        report.append(f"| {row['seed']} | {row['val_c_index']:.4f} |")
+    report.append("")
+    report.append(
+        f"Rentang antar-seed: [{seed_values.min():.4f}, {seed_values.max():.4f}] "
+        f"(std={float(seed_values.std()):.4f})."
+    )
+    (REPORTS_DIR / "uncertainty_baseline.md").write_text("\n".join(report), encoding="utf-8")
+    print(f"      Laporan: {REPORTS_DIR / 'uncertainty_baseline.md'}")
+
+    return {"bootstrap": bootstrap_rows, "seed_variation": seed_rows}
+
+
+# ---------------------------------------------------------------------------
+# Langkah tambahan (sesi peningkatan C-index): keluarga model. Ablation lama
+# (feature_ablation.md) sudah membuktikan performa TIDAK stabil tanpa fitur
+# riwayat, dan RSF tuning lama (model_comparison.md) sudah membuktikan
+# tuning DALAM keluarga RSF tidak membantu - tapi keluarga model DI LUAR
+# RSF/Cox belum pernah dicoba sama sekali. Sengaja TIDAK bergantung pada
+# run_threshold_experiment/run_ablation/run_previous_cycle_audit/
+# run_rsf_tuning di atas: dijalankan pada fitur FINAL PRODUKSI
+# (features.FEATURE_COLUMNS, threshold item_model=200 yang benar - lihat
+# README poin 8 soal diskrepansi threshold=300 di tabel tuning LAMA), supaya
+# isolasinya bersih - HANYA keluarga model yang berubah, fitur identik
+# dengan train.py saat ini.
+# ---------------------------------------------------------------------------
+
+
+def run_model_family(ctx: dict) -> dict:
+    print(
+        "\n[keluarga model] RSF vs Cox vs ExtraSurvivalTrees vs "
+        "GBSA(coxph) vs ComponentwiseGBSA(coxph)..."
+    )
+    dataset, masks = ctx["dataset"], ctx["masks"]
+    feature_frame = ctx["features"]  # fitur FINAL produksi (src/features.py), threshold=200 sudah benar
+
+    model_names = list(model_fit.MODEL_REGISTRY.keys())
+    result = run_config(
+        "model_family", feature_frame, features.CATEGORICAL_FEATURES,
+        features.NUMERIC_FEATURES + features.FLEET_FEATURES, dataset, masks, ctx,
+        model_names=model_names, with_operational=False, cache_key="model_family_all",
+    )
+
+    rows = [result_row("model_family", name, result) for name in model_names]
+    for row in rows:
+        print(
+            f"      {row['experiment']:38s} VAL C-index={row['val_c_index']:.4f}  "
+            f"TEST C-index={row['test_c_index']:.4f}"
+        )
+
+    report = [
+        "# Keluarga model: RSF vs Cox PH vs ExtraSurvivalTrees vs GBSA vs ComponentwiseGBSA", "",
+    ]
+    report.append(
+        "Semua model dilatih pada fitur FINAL PRODUKSI yang SAMA PERSIS (src/features.py, threshold "
+        "item_model=200/item_type=300 - lihat README poin 4 & 8), hyperparameter default per keluarga "
+        "(BUKAN hasil tuning - tuning per-keluarga adalah langkah terpisah). Tujuannya mengisolasi "
+        "kontribusi KELUARGA MODEL saja, terpisah dari kontribusi fitur (yang sudah diaudit habis di "
+        "feature_ablation.md/previous_cycle_audit.md - lihat README poin 5-6 dan 11)."
+    )
+    report.append("")
+    report.append(
+        "`GradientBoostingSurvivalAnalysis(loss='ipcwls'/'squared')` DIUJI lewat smoke test dan DIBUANG "
+        "dari registry (bukan dilewati tanpa dicoba): loss selain 'coxph' tidak punya baseline hazard "
+        "model, `predict_survival_function()`-nya melempar ValueError - tidak kompatibel dengan seluruh "
+        "pipeline di sini (evaluate.py IBS/Brier/AUC, predict.py) yang butuh kurva S(t) di SETIAP model, "
+        "bukan cuma skor risiko. Lihat catatan di src/model_fit.py."
+    )
+    report.append("")
+    report.append(
+        "Bandingkan angka di sini dengan reports/uncertainty_baseline.md - kandidat hanya dianggap "
+        "menang kalau naiknya di luar rentang ketidakpastian baseline di sana, bukan menang tipis."
+    )
+    report.append("")
+    report.append(render_table(rows))
+    (REPORTS_DIR / "model_family.md").write_text("\n".join(report), encoding="utf-8")
+    print(f"      Laporan: {REPORTS_DIR / 'model_family.md'}")
+
+    best_name = max(model_names, key=lambda name: result["native"][name]["validation"]["c_index"])
+    print(
+        f"      Keluarga model terbaik (VAL C-index): {best_name} "
+        f"({result['native'][best_name]['validation']['c_index']:.4f})"
+    )
+    return {"result": result, "rows": rows, "best_name": best_name}
+
+
+# ---------------------------------------------------------------------------
+# Langkah tambahan (sesi peningkatan C-index, Fase 2): fitur hazard baru -
+# prior survival empiris per grup (part model/item type/client), lihat
+# src/hazard_features.py untuk definisi lengkap dan alasan point-in-time
+# safety-nya. Forward-selection bertahap DARI FITUR FINAL PRODUKSI (bukan
+# dari nol, beda dengan run_ablation() yang membandingkan A_current warisan
+# classification vs konteks) - satu grup ditambah per langkah dulu supaya
+# kontribusinya terbaca terpisah, baru kombinasi ketiganya di akhir. Sengaja
+# TIDAK bergantung pada run_threshold_experiment/run_ablation/
+# run_previous_cycle_audit/run_rsf_tuning/run_model_family di atas - fitur
+# baru diuji di atas apa yang SUDAH final (features.FEATURE_COLUMNS), sama
+# seperti run_model_family() mengisolasi kontribusi keluarga model.
+# ---------------------------------------------------------------------------
+
+
+def run_hazard_ablation(ctx: dict) -> dict:
+    print("\n[fitur hazard] Prior survival empiris (part_model/item_type/client)...")
+    observations, dataset, masks = ctx["observations"], ctx["dataset"], ctx["masks"]
+    cycles, events = ctx["cycles"], ctx["events"]
+    final_features = ctx["features"]  # fitur FINAL produksi (src/features.py)
+
+    # item_type_at_install TIDAK ada di cycles mentah (hanya ditempel ke
+    # observations lewat install_context.attach_install_context() di
+    # build_dataset.build()) - ditempel ULANG di sini ke cycles PENUH (bukan
+    # hanya lifecycle eligible survival), supaya populasi "prior" untuk grup
+    # ini konsisten dengan part_model/client (populasi is_initial_model_cohort
+    # penuh, sama seperti attach_fleet). Tidak ada query DB baru - events
+    # SUDAH dibaca build_dataset.build().
+    cycles_with_type = install_context.attach_install_context(cycles, events)
+
+    prior_part_model = hazard_features.empirical_prior_survival(
+        observations, cycles, "item_model_code_clean", "part_model"
+    )
+    prior_item_type = hazard_features.empirical_prior_survival(
+        observations, cycles_with_type, "item_type_at_install", "item_type"
+    )
+    prior_client = hazard_features.empirical_prior_survival(
+        observations, cycles, "installed_client_clean", "client"
+    )
+
+    base_numeric = features.NUMERIC_FEATURES + features.FLEET_FEATURES
+
+    configs: dict[str, dict] = {}
+    configs["A_final"] = dict(feature_frame=final_features, numeric_columns=base_numeric)
+    configs["A_plus_partmodel_prior"] = dict(
+        feature_frame=pd.concat([final_features, prior_part_model], axis=1),
+        numeric_columns=base_numeric + list(prior_part_model.columns),
+    )
+    configs["A_plus_itemtype_prior"] = dict(
+        feature_frame=pd.concat([final_features, prior_item_type], axis=1),
+        numeric_columns=base_numeric + list(prior_item_type.columns),
+    )
+    configs["A_plus_client_prior"] = dict(
+        feature_frame=pd.concat([final_features, prior_client], axis=1),
+        numeric_columns=base_numeric + list(prior_client.columns),
+    )
+    configs["A_plus_all_priors"] = dict(
+        feature_frame=pd.concat([final_features, prior_part_model, prior_item_type, prior_client], axis=1),
+        numeric_columns=(
+            base_numeric + list(prior_part_model.columns) + list(prior_item_type.columns) + list(prior_client.columns)
+        ),
+    )
+
+    results: dict[str, dict] = {}
+    rows: list[dict] = []
+    for label, cfg in configs.items():
+        print(f"      Melatih {label}...")
+        result = run_config(
+            label, cfg["feature_frame"], features.CATEGORICAL_FEATURES, cfg["numeric_columns"],
+            dataset, masks, ctx, cache_key=f"hazard_{label}",
+        )
+        results[label] = {**result, "config": cfg}
+        for model_name in ("random_survival_forest", "cox_ph"):
+            row = result_row(label, model_name, result)
+            rows.append(row)
+            print(
+                f"        {row['experiment']:38s} VAL C-index={row['val_c_index']:.4f}  "
+                f"TEST C-index={row['test_c_index']:.4f}"
+            )
+
+    report = ["# Fitur hazard baru: prior survival empiris per grup (Fase 2)", ""]
+    report.append(
+        "F1 dari plan peningkatan C-index - untuk tiap lifecycle: di antara lifecycle LAIN pada grup "
+        "yang sama (part model/item type/client) yang SUDAH BERAKHIR sebelum installed_on baris ini "
+        "(point-in-time, mekanisme sama dengan feature_builder.attach_fleet - dihitung dari populasi "
+        "is_initial_model_cohort PENUH, bukan dibatasi lifecycle eligible survival), berapa yang "
+        "berakhir FAILURE dan berapa median durasinya. A_final = fitur produksi saat ini (tidak "
+        "berubah, baseline). A_plus_* mengisolasi kontribusi 1 grup saja. Bandingkan dengan "
+        "reports/uncertainty_baseline.md - hanya dianggap menang kalau naiknya di luar rentang "
+        "ketidakpastian baseline di sana. Lihat src/hazard_features.py untuk definisi lengkap."
+    )
+    report.append("")
+    report.append(render_table(rows))
+    (REPORTS_DIR / "hazard_ablation.md").write_text("\n".join(report), encoding="utf-8")
+    print(f"      Laporan: {REPORTS_DIR / 'hazard_ablation.md'}")
+
+    best_label = max(
+        configs, key=lambda label: results[label]["native"]["random_survival_forest"]["validation"]["c_index"]
+    )
+    print(f"      Konfigurasi terbaik (VAL C-index, RSF): {best_label}")
+    return {"results": results, "best_label": best_label, "rows": rows, "configs": configs}
+
+
+# ---------------------------------------------------------------------------
 
 
 def main() -> int:
@@ -666,6 +970,10 @@ def main() -> int:
     dataset = built["dataset"]
     masks = split_masks(dataset)
     ctx = {**built, "masks": masks}
+
+    uncertainty = run_uncertainty_baseline(ctx)
+    model_family = run_model_family(ctx)
+    hazard = run_hazard_ablation(ctx)
 
     chosen_thresholds = run_threshold_experiment(ctx)
     ablation = run_ablation(ctx, chosen_thresholds)
@@ -680,6 +988,12 @@ def main() -> int:
     print(f"  hyperparameter RSF  : {tuning['rsf_params']}")
     print(f"  kolom kategorikal   : {tuning['categorical_columns']}")
     print(f"  kolom numerik       : {tuning['numeric_columns']}")
+    print(f"  keluarga model terbaik (VAL): {model_family['best_name']}")
+    print(f"  fitur hazard terbaik (VAL)  : {hazard['best_label']}")
+    print(
+        f"  RSF baseline 95% CI (VAL)  : "
+        f"[{uncertainty['bootstrap'][0]['ci_lower_2_5']:.4f}, {uncertainty['bootstrap'][0]['ci_upper_97_5']:.4f}]"
+    )
     return 0
 
 

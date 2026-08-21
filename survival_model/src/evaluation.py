@@ -35,12 +35,22 @@ def _usable_horizons(y_train, y_eval, horizons: list[int] = HORIZONS_DAYS) -> li
     return [h for h in horizons if min_eval < h < limit]
 
 
-def native_metrics(model, y_train, x_eval, y_eval) -> dict:
+def native_metrics(model, y_train, x_eval, y_eval, risk_sign: int = 1) -> dict:
     """C-index + (kalau follow-up cukup panjang) IBS/Brier/AUC per horizon
     30/60/90/120 hari, dievaluasi dari t=0=installed_on - cara standar
     survival dievaluasi, BUKAN metrik operasional 30-hari (itu Lapis 2,
-    lihat evaluate.py compare_with_classification())."""
-    risk = model.predict(x_eval)
+    lihat evaluate.py compare_with_classification()).
+
+    `risk_sign`: sebagian besar model survival (RSF, ExtraSurvivalTrees, Cox
+    PH, GradientBoostingSurvivalAnalysis loss='coxph') mengikuti konvensi
+    predict()="skor lebih tinggi = lebih berisiko" - tapi
+    GradientBoostingSurvivalAnalysis dengan loss='ipcwls'/'squared'
+    predict()-nya mengembalikan PERKIRAAN WAKTU (arah terbalik). `risk_sign`
+    (dari src/model_fit.MODEL_REGISTRY) membalik arah itu SEBELUM dipakai di
+    concordance_index_censored/ipcw & cumulative_dynamic_auc, supaya seluruh
+    model dibandingkan pada konvensi yang sama. Default 1 (tidak dibalik) -
+    aman untuk model lama (RSF/Cox) yang sudah sesuai konvensi."""
+    risk = risk_sign * model.predict(x_eval)
     c_index = concordance_index_censored(y_eval["event"], y_eval["time"], risk)[0]
 
     result: dict = {
@@ -95,3 +105,47 @@ def native_metrics(model, y_train, x_eval, y_eval) -> dict:
         result["time_dependent_auc_at_horizon"] = {}
 
     return result
+
+
+def bootstrap_c_index(
+    model, y_train, x_eval, y_eval, risk_sign: int = 1, n_boot: int = 200, seed: int = 42
+) -> dict:
+    """Interval kepercayaan C-index (Harrell) lewat bootstrap baris eval.
+
+    README/audit sebelumnya melaporkan C-index sebagai titik tunggal - itu
+    menyembunyikan seberapa jauh dua angka bisa dibedakan secara berarti.
+    VALIDATION hanya punya 385 event (lihat metadata.json) - bootstrap di
+    sini mengukur SEBERAPA LEBAR ketidakpastian itu, supaya kandidat model/
+    fitur baru hanya dianggap "menang" kalau naiknya di luar rentang ini,
+    bukan menang tipis 0,001 yang bisa jadi murni noise resampling.
+
+    Risk score dihitung SEKALI di luar loop resampling (predict() tidak
+    berubah antar resample - hanya baris mana yang dipakai concordance_index
+    yang berubah), supaya 200 resample tidak memanggil ulang model.predict()
+    200 kali."""
+    risk = risk_sign * model.predict(x_eval)
+    event = np.asarray(y_eval["event"])
+    time = np.asarray(y_eval["time"])
+    n = len(event)
+
+    rng = np.random.default_rng(seed)
+    scores = np.empty(n_boot)
+    for i in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        try:
+            scores[i] = concordance_index_censored(event[idx], time[idx], risk[idx])[0]
+        except ZeroDivisionError:
+            # Resample tanpa pasangan comparable sama sekali (langka, hanya
+            # mungkin pada n_boot besar/n kecil) - dibuang dari CI, bukan
+            # dipaksa jadi 0.5 yang akan menyesatkan lebar interval.
+            scores[i] = np.nan
+
+    valid = scores[~np.isnan(scores)]
+    return {
+        "point_estimate": float(concordance_index_censored(event, time, risk)[0]),
+        "bootstrap_mean": float(np.mean(valid)),
+        "ci_lower_2_5": float(np.percentile(valid, 2.5)),
+        "ci_upper_97_5": float(np.percentile(valid, 97.5)),
+        "std": float(np.std(valid)),
+        "n_boot_valid": int(len(valid)),
+    }

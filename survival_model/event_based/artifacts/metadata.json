@@ -1,0 +1,307 @@
+{
+  "training_date": "2026-08-21T05:05:29.897159+00:00",
+  "data_end": "2026-08-03 11:07:22",
+  "primary_model": "random_survival_forest",
+  "unit_of_observation": "one row per (lifecycle, landmark) - features/age RE-ANCHORED at each landmark's observation_on (install / organic operational event / sparse 90-365d anchor), NOT frozen at installed_on like the static model (survival_model/)",
+  "target": "duration_days (residual time from landmark's observation_on to failure/censoring), event_observed",
+  "landmark_design": {
+    "sources": [
+      "INSTALL (age=0, always)",
+      "ORGANIC_EVENT (operational event mid-cycle)",
+      "ANCHOR (90/180/365d then +365d, capped)"
+    ],
+    "split_assignment": "follows the LIFECYCLE's installed_on (NOT per-landmark L) - see eb_src/landmark_builder.py docstring"
+  },
+  "feature_columns": [
+    "part_model_category",
+    "client_category",
+    "installation_age_band",
+    "item_type_at_install_grouped",
+    "terminal_type_grouped",
+    "log_days_since_installation",
+    "log_total_prior_events",
+    "log_prior_failure_count",
+    "has_prior_failure",
+    "log_prior_corrective_count",
+    "has_prior_corrective",
+    "log_days_since_last_corrective",
+    "log_prior_distinct_places",
+    "log_prior_corrective_30d",
+    "log_prior_failure_365d",
+    "log_prior_events_180d",
+    "month_sin",
+    "month_cos",
+    "log_previous_cycle_confirmed_failure_lifetime_mean",
+    "has_previous_cycle_confirmed_failure_lifetime_mean",
+    "log_failure_interval_mean_days",
+    "log_failure_interval_last_days",
+    "failure_interval_trend_ratio",
+    "has_failure_interval_trend",
+    "log_cumulative_prior_cycle_days",
+    "log_physical_age_now",
+    "previous_cycle_count",
+    "prior_corrective_60d",
+    "log_prior_corrective_60d",
+    "prior_corrective_90d",
+    "log_prior_corrective_90d",
+    "log_model_failures_90d",
+    "model_failure_rate_90d",
+    "log_model_fleet_size"
+  ],
+  "categorical_features": [
+    "part_model_category",
+    "client_category",
+    "installation_age_band",
+    "item_type_at_install_grouped",
+    "terminal_type_grouped"
+  ],
+  "category_thresholds": {
+    "item_model_code_clean": 200,
+    "item_type_at_install": 300
+  },
+  "rows_by_split": {
+    "TRAIN": 92298,
+    "VALIDATION": 5540,
+    "TEST": 4890
+  },
+  "lifecycles_by_split": {
+    "TEST": 2820,
+    "TRAIN": 14980,
+    "VALIDATION": 2316
+  },
+  "events_by_split": {
+    "TEST": 412,
+    "TRAIN": 11207,
+    "VALIDATION": 534
+  },
+  "support_totals": {
+    "0120201": 3182,
+    "0120202": 356,
+    "0120204": 1245,
+    "0120401": 1028,
+    "0120701": 165,
+    "0120702": 24,
+    "0120801": 210,
+    "0120901": 311,
+    "0121101": 1472,
+    "0121103": 1089,
+    "0121401": 415,
+    "0121408": 24,
+    "0121602": 677,
+    "0121603": 354,
+    "0121701": 271,
+    "0220402": 234,
+    "0220601": 201,
+    "0220602": 123,
+    "0220603": 13,
+    "0221601": 250,
+    "0320203": 199,
+    "0321301": 487,
+    "0321302": 490,
+    "0321501": 913,
+    "0420501": 415,
+    "0420502": 656,
+    "0420503": 135,
+    "0420504": 276,
+    "0420506": 11,
+    "0420510": 156,
+    "0521102": 491,
+    "0521104": 68,
+    "0521201": 1729,
+    "0521202": 372,
+    "0521203": 347,
+    "0521204": 76,
+    "0620302": 1064,
+    "0620307": 47,
+    "0620308": 6,
+    "0620505": 689,
+    "0620512": 4,
+    "0620517": 27,
+    "0720301": 1912,
+    "0721001": 165,
+    "0820303": 143,
+    "0820507": 53,
+    "0820604": 11,
+    "0820605": 37,
+    "0820607": 7,
+    "0821901": 39,
+    "0921604": 59,
+    "0921610": 22,
+    "1020206": 11,
+    "1020511": 2,
+    "1020513": 8,
+    "1020514": 5,
+    "1020515": 1,
+    "1020516": 1,
+    "1020606": 5,
+    "1020608": 1,
+    "1020609": 5,
+    "1020610": 5,
+    "1021402": 50,
+    "1021406": 2,
+    "1021407": 1,
+    "1021902": 6,
+    "1122001": 356,
+    "1420511": 40,
+    "1520512": 279,
+    "1521403": 126,
+    "1521405": 207,
+    "1620205": 4,
+    "1920611": 24,
+    "1921105": 12,
+    "1921205": 14,
+    "1921303": 12
+  },
+  "item_type_support_totals": {
+    "BARCODE SCANNER": 3172,
+    "CARD DISPANSER": 189,
+    "CARD SLOT": 210,
+    "CASH DISPENSER": 311,
+    "CASH DRAWER": 45,
+    "COIN ACCEPTOR": 165,
+    "COIN DISPENSER": 271,
+    "CONTROLLER": 3132,
+    "DISPLAY": 432,
+    "LAN ARRESTER": 356,
+    "MODULE BILL ACCEPTOR": 1262,
+    "MODULE READER": 4997,
+    "MOTOR": 2538,
+    "PC": 2758,
+    "POWER SUPPLY": 989,
+    "PRINTER": 825,
+    "TRANSFORMER": 913,
+    "UPS": 1362
+  },
+  "terminal_support_totals": {
+    "BALANCE READER": 514,
+    "CVIM": 3269,
+    "GATE": 8054,
+    "POS": 1256,
+    "UNKNOWN": 10347,
+    "VENDING MACHINE": 487
+  },
+  "hyperparameters": {
+    "random_survival_forest": {
+      "n_estimators": 100,
+      "min_samples_split": 40,
+      "min_samples_leaf": 30,
+      "max_features": "sqrt",
+      "n_jobs": -1,
+      "random_state": 42
+    },
+    "cox_ph": {
+      "alpha": 0.1,
+      "ties": "efron"
+    }
+  },
+  "evaluation_metrics_full_landmark_rows": {
+    "random_survival_forest": {
+      "validation": {
+        "rows": 5540,
+        "events": 534,
+        "c_index": 0.8290270977967045,
+        "max_followup_days": 363.0,
+        "uno_c_index": 0.8291389920795252,
+        "horizons_evaluable_days": [
+          30,
+          60,
+          90,
+          120
+        ],
+        "integrated_brier_score": 0.04746517713658578,
+        "brier_at_horizon": {
+          "30": 0.035696829938949154,
+          "60": 0.046002440963979443,
+          "90": 0.051599256507667474,
+          "120": 0.05389083793727165
+        },
+        "time_dependent_auc_at_horizon": {
+          "30": 0.8356710898315958,
+          "60": 0.8236711754772281,
+          "90": 0.8308765256866597,
+          "120": 0.8423632919272904
+        }
+      },
+      "test": {
+        "rows": 4890,
+        "events": 412,
+        "c_index": 0.8477123048146447,
+        "max_followup_days": 214.0,
+        "uno_c_index": 0.8475588562649572,
+        "horizons_evaluable_days": [
+          30,
+          60,
+          90,
+          120
+        ],
+        "integrated_brier_score": 0.05088881845427292,
+        "brier_at_horizon": {
+          "30": 0.048732548889088775,
+          "60": 0.05094329109745243,
+          "90": 0.051879914706527974,
+          "120": 0.050953950228587945
+        },
+        "time_dependent_auc_at_horizon": {
+          "30": 0.8817974213731148,
+          "60": 0.9002395213576111,
+          "90": 0.8704679799148525,
+          "120": 0.8967243122588178
+        }
+      }
+    },
+    "cox_ph": {
+      "validation": {
+        "rows": 5540,
+        "events": 534,
+        "c_index": 0.7914515789978517,
+        "max_followup_days": 363.0,
+        "uno_c_index": 0.7919477286483133,
+        "horizons_evaluable_days": [
+          30,
+          60,
+          90,
+          120
+        ],
+        "integrated_brier_score": 0.05362900428460551,
+        "brier_at_horizon": {
+          "30": 0.03869459799576158,
+          "60": 0.052431829410834026,
+          "90": 0.058538903077725586,
+          "120": 0.06113796273475223
+        },
+        "time_dependent_auc_at_horizon": {
+          "30": 0.791714174650222,
+          "60": 0.7892897337082826,
+          "90": 0.801984858068394,
+          "120": 0.8193232964341306
+        }
+      },
+      "test": {
+        "rows": 4890,
+        "events": 412,
+        "c_index": 0.7618011320445733,
+        "max_followup_days": 214.0,
+        "uno_c_index": 0.7619968459424893,
+        "horizons_evaluable_days": [
+          30,
+          60,
+          90,
+          120
+        ],
+        "integrated_brier_score": 0.06501409221599042,
+        "brier_at_horizon": {
+          "30": 0.059884057599783574,
+          "60": 0.06511465444502026,
+          "90": 0.06660316627890102,
+          "120": 0.06676485424831634
+        },
+        "time_dependent_auc_at_horizon": {
+          "30": 0.7869927404047721,
+          "60": 0.8079887718472595,
+          "90": 0.7939969361471442,
+          "120": 0.8266000428853894
+        }
+      }
+    }
+  }
+}
