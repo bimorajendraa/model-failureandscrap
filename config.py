@@ -15,8 +15,17 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-PACKAGE_DIR = Path(__file__).resolve().parent
-MODEL_DIR = PACKAGE_DIR / "models"
+# PACKAGE_DIR hari ini = root repo (config.py ada di sini) - kebetulan sama
+# karena file ini belum pernah dipindah. Rencana restrukturisasi ke
+# src/partrisk/ akan MEMATAHKAN itu (config.py tidak lagi tinggal di root),
+# sementara models/ dan .env TETAP di root (models/ artifact, bukan bagian
+# package - lihat plan restrukturisasi). PARTRISK_HOME/PARTRISK_MODEL_DIR/
+# PARTRISK_ENV_FILE mendahului pemindahan itu: default mereproduksi path
+# hari ini PERSIS, jadi baris ini sendiri TIDAK mengubah perilaku apa pun
+# sekarang - cuma menyediakan jalan keluar sebelum jalan itu dibutuhkan.
+PACKAGE_DIR = Path(os.environ.get("PARTRISK_HOME", str(Path(__file__).resolve().parent)))
+MODEL_DIR = Path(os.environ.get("PARTRISK_MODEL_DIR", str(PACKAGE_DIR / "models")))
+ENV_FILE = Path(os.environ.get("PARTRISK_ENV_FILE", str(PACKAGE_DIR / ".env")))
 # Satu folder per model, masing-masing berisi CURRENT + v1, v2, ... supaya
 # tidak ada dua "v1" yang artinya berbeda.
 FAILURE_MODEL_DIR = MODEL_DIR / "failure"
@@ -280,7 +289,7 @@ SCRAP_MODEL_NAME = "Gabungan LogReg + RF"
 
 def db_settings() -> dict[str, str]:
     """Kredensial database dari .env / environment. Production hanya membaca."""
-    load_dotenv(PACKAGE_DIR / ".env")
+    load_dotenv(ENV_FILE)
     required = ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"]
     missing = [name for name in required if not os.getenv(name)]
     if missing:

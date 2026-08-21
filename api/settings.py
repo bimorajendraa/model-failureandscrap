@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 
 import config
 
-load_dotenv(config.PACKAGE_DIR / ".env")
+load_dotenv(config.ENV_FILE)
 
 
 def _int(name: str, default: int) -> int:
