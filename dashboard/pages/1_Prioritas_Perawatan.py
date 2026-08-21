@@ -86,6 +86,7 @@ ui.priority_table(
         "failure_risk_level",
         "scrap_probability",
         "scrap_risk_level",
+        "median_days_to_failure",
         "priority",
         "recommended_action",
     ],

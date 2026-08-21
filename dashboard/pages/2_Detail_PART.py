@@ -58,6 +58,11 @@ with st.container(border=True):
     ui.horizon_metrics(failure)
     ui.probability_caption()
 
+if failure.get("survival_curve") or failure.get("median_days_to_failure") is not None:
+    st.subheader("Perkiraan umur")
+    with st.container(border=True):
+        ui.survival_advisory(failure)
+
 st.subheader("Risiko rusak total")
 st.caption(
     "Kalau PART ini rusak, seberapa besar kemungkinan sudah tidak bisa "

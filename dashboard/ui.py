@@ -71,6 +71,7 @@ COLUMN_LABELS = {
     "scrap_probability": "Peluang rusak total",
     "scrap_risk_level": "Tingkat risiko rusak total",
     "death_probability_30d": "Peluang harus diganti (30H)",
+    "median_days_to_failure": "Perkiraan sisa umur (hari)",
     "priority": "Prioritas",
     "recommended_action": "Tindakan",
     "active_parts": "PART aktif",
@@ -182,6 +183,14 @@ def priority_table(items: list[dict], columns: list[str], key: str = "priority_t
             display[column] = display[column].map(api_client.percent)
     if "installation_age_days" in display.columns:
         display["installation_age_days"] = display["installation_age_days"].round(0)
+    if "median_days_to_failure" in display.columns:
+        # to_numeric dulu (BUKAN langsung .round()): kolom ini SERING seluruhnya
+        # None dalam satu halaman (median cuma tersedia utk ~5% PART aktif -
+        # lihat predict/survival.py) - pandas menyimpannya sebagai dtype
+        # object saat itu terjadi, dan .round() menolak dtype object.
+        display["median_days_to_failure"] = pd.to_numeric(
+            display["median_days_to_failure"], errors="coerce"
+        ).round(0)
 
     event = st.dataframe(
         display.rename(columns=COLUMN_LABELS),
@@ -237,4 +246,43 @@ def probability_caption() -> None:
     st.caption(
         "Angka di atas adalah PELUANG kerusakan dalam jangka waktu tersebut - "
         "model tidak memperkirakan tanggal kerusakan."
+    )
+
+
+def days_label(days: float | None) -> str:
+    """Jumlah hari -> label - kosong ditampilkan apa adanya, bukan '0 hari'."""
+    return "-" if days is None or pd.isna(days) else f"{days:.0f} hari"
+
+
+def survival_advisory(failure: dict) -> None:
+    """Perkiraan umur dari model survival TERPISAH (mode aditif - field ini
+    TIDAK menentukan risiko/rekomendasi di bagian lain halaman, murni
+    tambahan konteks "kalau tren sekarang berlanjut, kira-kira kapan").
+
+    median_days_to_failure SERING kosong (S(t) jarang turun sampai separuh
+    dalam rentang follow-up training - lihat median_days_to_failure_basis) -
+    days_until_survival_90pct jauh lebih sering terisi, ditampilkan
+    berdampingan supaya halaman tetap berguna walau median kosong.
+    """
+    median = failure.get("median_days_to_failure")
+    at_90pct = failure.get("days_until_survival_90pct")
+    curve = failure.get("survival_curve")
+
+    left, right = st.columns(2)
+    left.metric("Perkiraan sisa umur (median)", days_label(median))
+    if median is None and failure.get("median_days_to_failure_basis"):
+        left.caption(failure["median_days_to_failure_basis"])
+    right.metric("Mulai naik dari kondisi sekarang", days_label(at_90pct))
+
+    if curve:
+        chart_data = pd.DataFrame(curve).rename(
+            columns={"days_from_now": "Hari dari sekarang", "survival_probability": "Peluang belum rusak"}
+        ).set_index("Hari dari sekarang")
+        st.line_chart(chart_data, y="Peluang belum rusak")
+
+    st.caption(
+        "Model TERPISAH dari risiko kerusakan 30/60/90/120 hari di atas - tidak dipakai "
+        "menentukan risiko atau rekomendasi. Kurva S(t) BELUM dikalibrasi "
+        "(curve_is_calibrated=false): bacalah sebagai kecenderungan relatif, bukan "
+        "probabilitas presisi."
     )
