@@ -40,6 +40,7 @@ from partrisk.data import reader as data_reader
 from partrisk.features import failure as feature_builder
 from partrisk.features.survival import builder as features
 from partrisk.features.survival import install_context, previous_cycle
+from partrisk.predict import failure as predict_failure
 from partrisk.survival import curves
 from partrisk.training import landmark_eval
 
@@ -109,8 +110,6 @@ def predict(item_id: str) -> dict:
     age_days = float((dataset_max_event_on - installed_on).total_seconds() / 86400.0)
 
     events = data_reader.get_events(item_id)
-    all_cycles = data_reader.get_cycles()
-    episodes = data_reader.get_failure_episodes()
 
     # --- Landmark TUNGGAL = SEKARANG (observation_on=dataset_max_event_on) -
     # SAMA persis mekanismenya dengan satu baris landmark saat training
@@ -124,10 +123,26 @@ def predict(item_id: str) -> dict:
     terminal_raw = data_reader.get_terminal_context(item_id)
     observations = features.attach_terminal_extra(observations, terminal_raw)
     observations = feature_builder.attach_history(observations, events)
-    observations = feature_builder.attach_fleet(observations, all_cycles, episodes)
-    observations = features.attach_dynamic_extra(observations, all_cycles, events)
+    # attach_fleet_snapshot (BUKAN attach_fleet + get_cycles() tanpa filter)
+    # SENGAJA - landmark di sini SELALU "sekarang" (observation_on=
+    # dataset_max_event_on), titik waktu yang PERSIS sama dengan snapshot
+    # armada yang sudah di-cache predict/failure.py (dipakai CatBoost) -
+    # attach_fleet_snapshot() dijamin identik dengan attach_fleet() point-in-time
+    # untuk kasus ini (lihat docstring features/fleet.py attach_fleet_snapshot).
+    # Dulu di sini memanggil get_cycles() TANPA filter (seluruh armada,
+    # puluhan ribu baris) di SETIAP request satu-PART - di native itu cepat,
+    # tapi lewat jaringan Docker (host.docker.internal) terukur >50 detik per
+    # assessment. predict_failure.fleet_snapshot() sudah dicache per-proses
+    # dan diinvalidasi otomatis lewat data_state (clear_fleet_cache()) -
+    # pakai cache yang sama, jangan query fleet-wide kedua kalinya.
+    observations = feature_builder.attach_fleet_snapshot(observations, predict_failure.fleet_snapshot(dataset_max_event_on))
+    # attach_dynamic_extra dan audit_previous_cycle_features juga groupby
+    # per item_identifier_clean - hasilnya identik dipakaikan cycles_for_item
+    # (riwayat PART INI saja, sudah diambil di atas) daripada seluruh armada,
+    # baris item lain tidak pernah mempengaruhi hasil baris item ini.
+    observations = features.attach_dynamic_extra(observations, cycles_for_item, events)
 
-    pc = previous_cycle.audit_previous_cycle_features(all_cycles)
+    pc = previous_cycle.audit_previous_cycle_features(cycles_for_item)
     observations = observations.merge(
         pc[[
             "installation_cycle_id", "previous_cycle_confirmed_failure_lifetime_mean", "last_confirmed_failure_lifetime",
