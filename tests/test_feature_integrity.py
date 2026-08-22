@@ -61,6 +61,12 @@ def _minimal_failure_raw(n: int = 3) -> pd.DataFrame:
         "failure_interval_trend_ratio": [1.0, 0.8, 1.0][:n],
         "log_prior_corrective_60d": [0.0, 1.0, 0.0][:n],
         "log_prior_corrective_90d": [0.0, 1.0, 0.0][:n],
+        # Local failure density per item_type_at_install - lihat
+        # config.LOCAL_DENSITY_FEATURES.
+        "log_item_type_failures_90d": [0.0, 1.0, 0.5][:n],
+        "item_type_failure_rate_90d": [0.0, 0.05, 0.02][:n],
+        "log_item_type_failures_180d": [0.0, 1.5, 0.7][:n],
+        "item_type_failure_rate_180d": [0.0, 0.07, 0.03][:n],
     })
 
 

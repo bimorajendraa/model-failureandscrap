@@ -23,7 +23,15 @@ import numpy as np
 import pandas as pd
 
 from partrisk import config
-from partrisk.features.fleet import _count_before, attach_fleet, attach_fleet_snapshot, fleet_snapshot
+from partrisk.features.fleet import (
+    _count_before,
+    attach_fleet,
+    attach_fleet_snapshot,
+    attach_item_type_density,
+    attach_item_type_density_snapshot,
+    fleet_snapshot,
+    item_type_density_snapshot,
+)
 from partrisk.features.history import _HISTORY_COUNTS, attach_degradation_history, attach_history
 from partrisk.features.observations import current_observations, training_observations
 from partrisk.features.support import cumulative_support, part_model_support, support_totals
@@ -37,6 +45,9 @@ __all__ = [
     "attach_fleet",
     "fleet_snapshot",
     "attach_fleet_snapshot",
+    "attach_item_type_density",
+    "item_type_density_snapshot",
+    "attach_item_type_density_snapshot",
     "cumulative_support",
     "support_totals",
     "part_model_support",
@@ -145,8 +156,18 @@ def build_features(raw: pd.DataFrame, support: pd.Series) -> pd.DataFrame:
     for column in config.FLEET_FEATURES:
         features[column] = pd.to_numeric(raw[column], errors="coerce").fillna(0.0)
 
+    # --- Local failure density per item_type_at_install ----------------------
+    # Sudah dihitung attach_item_type_density (training) atau
+    # attach_item_type_density_snapshot (prediction) - pola sama dengan
+    # kondisi armada di atas, hanya disalin di sini.
+    for column in config.LOCAL_DENSITY_FEATURES:
+        features[column] = pd.to_numeric(raw[column], errors="coerce").fillna(0.0)
+
     features[config.CATEGORICAL_FEATURES] = features[config.CATEGORICAL_FEATURES].astype(str)
-    numeric = config.NUMERIC_FEATURES + config.FLEET_FEATURES + config.DEGRADATION_FEATURES
+    numeric = (
+        config.NUMERIC_FEATURES + config.FLEET_FEATURES
+        + config.DEGRADATION_FEATURES + config.LOCAL_DENSITY_FEATURES
+    )
     features[numeric] = features[numeric].astype(float)
     return features[config.FEATURE_COLUMNS]
 

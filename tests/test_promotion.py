@@ -180,6 +180,7 @@ def test_evaluate_incumbent_menghasilkan_skor_valid():
     observations = feature_builder.attach_degradation_history(observations, cycles, events)
     episodes = data_reader.get_failure_episodes()
     observations = feature_builder.attach_fleet(observations, cycles, episodes)
+    observations = feature_builder.attach_item_type_density(observations, events, cycles, episodes)
     eligible = observations.loc[observations["is_eligible"]].reset_index(drop=True)
     eligible["split"] = train.assign_split(eligible, data_end)
     eligible = eligible.loc[eligible["split"].isin([train.TRAIN, train.VALIDATION, train.TEST])]

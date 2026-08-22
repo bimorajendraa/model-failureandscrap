@@ -129,7 +129,7 @@ def _compute(generation: int) -> BatchScores:
 
     data_end = pd.Timestamp(cycles["dataset_max_event_on"].max())
 
-    failure, snapshot, full_snapshot = _score_failure(cycles, events, data_end)
+    failure, snapshot, full_snapshot = _score_failure(cycles, events, episodes, data_end)
     scrap = _score_scrap(events, cycles, data_end, failure["item_id"])
     survival_advisory = _score_survival_advisory(full_snapshot, events, cycles, episodes, terminal_raw)
 
@@ -158,14 +158,24 @@ def _compute(generation: int) -> BatchScores:
 
 
 def _score_failure(
-    cycles: pd.DataFrame, events: pd.DataFrame, data_end: pd.Timestamp
+    cycles: pd.DataFrame, events: pd.DataFrame, episodes: pd.DataFrame, data_end: pd.Timestamp
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Perantaian hazard yang sama seperti predict(), untuk semua PART aktif.
 
     Urutan panggilannya sengaja dibuat identik dengan predict.predict():
     current_observations -> attach_history -> attach_degradation_history ->
-    attach_fleet_snapshot -> part_model_support -> project_features per
-    langkah 30 hari.
+    attach_fleet_snapshot -> attach_item_type_density_snapshot ->
+    part_model_support -> project_features per langkah 30 hari.
+
+    `episodes` diteruskan dari `_compute()` (SUDAH diambil di sana untuk
+    keperluan lain) supaya potret density item_type dihitung LANGSUNG dari
+    cycles/events/episodes yang sudah di tangan - BUKAN lewat
+    `failure_model.item_type_density_snapshot()` (cache in-proses milik
+    predict.py, dirancang untuk request satu-PART yang berulang-ulang).
+    Batch scoring SENGAJA di luar query_cache (lihat docstring
+    serving/query_cache.py) dan cuma jalan sekali per data_end - lewat cache
+    predict.py di sini artinya fetch cycles/events/episodes redundan
+    (terukur: ~172 detik vs ~66 detik tanpa redundansi ini).
 
     Mengembalikan TIGA hal: skor, nilai fitur mentahnya (dipakai halaman
     detail untuk menjelaskan faktor risiko - fitur itu sudah dihitung di sini,
@@ -182,6 +192,9 @@ def _score_failure(
     snapshot = feature_builder.attach_degradation_history(snapshot, cycles, events)
     snapshot = feature_builder.attach_fleet_snapshot(
         snapshot, failure_model.fleet_snapshot(data_end)
+    )
+    snapshot = feature_builder.attach_item_type_density_snapshot(
+        snapshot, events, feature_builder.item_type_density_snapshot(cycles, events, episodes, data_end)
     )
     support = feature_builder.part_model_support(
         snapshot, metadata["part_model_support"]
@@ -237,8 +250,9 @@ def _score_failure(
     # Kalau kolom degradasi CatBoost ikut terbawa, merge/concat internal
     # survival bentrok nama (KeyError atau kolom duplikat senyap). Buang
     # dulu di sini - CatBoost sendiri sudah tidak butuh lagi setelah loop
-    # predict_proba() di atas selesai.
-    full_snapshot = snapshot.drop(columns=config.DEGRADATION_FEATURES)
+    # predict_proba() di atas selesai. LOCAL_DENSITY_FEATURES juga dibuang -
+    # tidak collision-prone (nama unik), tapi konsisten dengan pola di atas.
+    full_snapshot = snapshot.drop(columns=config.DEGRADATION_FEATURES + config.LOCAL_DENSITY_FEATURES)
     return result, features_by_item, full_snapshot
 
 

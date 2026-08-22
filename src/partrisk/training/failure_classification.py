@@ -83,6 +83,9 @@ def build_dataset() -> tuple:
     # Kondisi armada dihitung point-in-time untuk tiap observasi.
     episodes = data_reader.get_failure_episodes()
     observations = feature_builder.attach_fleet(observations, cycles, episodes)
+    # Local failure density per item_type_at_install (90/180d) - generalisasi
+    # attach_fleet ke kategori lebih luas, lihat reports/local_density_experiment.md.
+    observations = feature_builder.attach_item_type_density(observations, events, cycles, episodes)
 
     # Dukungan historis dihitung dari SELURUH observasi, sebelum penyaringan
     # kelayakan, supaya nilainya benar-benar point-in-time.
@@ -221,6 +224,7 @@ def evaluate_incumbent(previous_version: str, dataset: pd.DataFrame) -> dict:
 def active_part_scores(
     model, calibrator, cycles: pd.DataFrame, events: pd.DataFrame,
     support_totals: dict[str, int], episodes: pd.DataFrame, fleet: pd.DataFrame,
+    item_type_density: pd.DataFrame,
 ) -> np.ndarray:
     """Peluang kerusakan 30 hari (terkalibrasi) seluruh PART yang saat ini
     masih terpasang - populasi produksi sesungguhnya yang dihadapi predict.py,
@@ -231,6 +235,7 @@ def active_part_scores(
     snapshot = feature_builder.attach_history(snapshot, events)
     snapshot = feature_builder.attach_degradation_history(snapshot, cycles, events)
     snapshot = feature_builder.attach_fleet_snapshot(snapshot, fleet)
+    snapshot = feature_builder.attach_item_type_density_snapshot(snapshot, events, item_type_density)
     support = feature_builder.part_model_support(snapshot, support_totals)
     features = feature_builder.build_features(snapshot, support)
     raw = model.predict_proba(features)[:, 1]
@@ -341,8 +346,12 @@ def main() -> int:
     dataset, features, support_totals, data_end, events, cycles, episodes = build_dataset()
     model, calibrator, metrics, raw_test = train_model(dataset, features)
     fleet = feature_builder.fleet_snapshot(cycles, episodes, data_end)
+    item_type_density = feature_builder.item_type_density_snapshot(cycles, events, episodes, data_end)
     cutoffs, cutoff_basis = choose_cutoffs(
-        active_part_scores(model, calibrator, cycles, events, support_totals, episodes, fleet))
+        active_part_scores(
+            model, calibrator, cycles, events, support_totals, episodes, fleet, item_type_density,
+        )
+    )
 
     print("[5/5] Menyimpan dan mengevaluasi promosi...")
     for name in ("train", "validation", "test"):

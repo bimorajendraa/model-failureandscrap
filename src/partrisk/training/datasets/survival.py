@@ -110,6 +110,9 @@ def build() -> dict:
     # punya previous_cycle_count RAW (dipakai survival sendiri) - tinggal
     # di-log1p.
     landmarks["log_previous_cycle_count"] = np.log1p(landmarks["previous_cycle_count"].astype(float))
+    # Sama, LOCAL_DENSITY_FEATURES (item_type density) - banyak titik waktu
+    # berbeda di sini, pakai versi point-in-time langsung.
+    landmarks = feature_builder.attach_item_type_density(landmarks, events, cycles, episodes)
 
     feature_frame = features.compute_features(landmarks, support, item_type_support, terminal_support)
 

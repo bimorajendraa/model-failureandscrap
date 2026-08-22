@@ -33,6 +33,23 @@ from partrisk.features import failure as feature_builder
 
 _LOADED: tuple[CatBoostClassifier, object, dict] | None = None
 _FLEET: object = None
+_ITEM_TYPE_DENSITY: object = None
+
+
+def _item_type_density_snapshot(data_end):
+    """Laju kerusakan tiap item_type_at_install (90/180d) - pola cache sama
+    dengan _fleet_snapshot() (potret dipakai ulang selama data belum
+    bertambah), TANPA fast-path CSV tersimpan (dampaknya kecil - hanya
+    beberapa kategori item_type, bukan ratusan model PART seperti fleet)."""
+    global _ITEM_TYPE_DENSITY
+    if _ITEM_TYPE_DENSITY is not None:
+        return _ITEM_TYPE_DENSITY
+
+    events = data_reader.get_events()
+    cycles = data_reader.get_cycles()
+    episodes = data_reader.get_failure_episodes()
+    _ITEM_TYPE_DENSITY = feature_builder.item_type_density_snapshot(cycles, events, episodes, data_end)
+    return _ITEM_TYPE_DENSITY
 
 
 def _fleet_snapshot(data_end):
@@ -155,6 +172,11 @@ def predict(item_id: str) -> dict:
     # Kondisi armada butuh riwayat SELURUH model PART, bukan hanya PART ini -
     # potretnya dibaca sekali per proses lalu dipakai ulang.
     snapshot = feature_builder.attach_fleet_snapshot(snapshot, _fleet_snapshot(data_end))
+    # Local failure density per item_type_at_install - sama alasannya
+    # dengan kondisi armada di atas (butuh SELURUH armada), potret dicache.
+    snapshot = feature_builder.attach_item_type_density_snapshot(
+        snapshot, events, _item_type_density_snapshot(data_end)
+    )
     support = feature_builder.part_model_support(
         snapshot, metadata["part_model_support"]
     )
@@ -197,16 +219,20 @@ def clear_fleet_cache() -> None:
     """Buang potret armada tersimpan supaya dibangun ulang di panggilan berikutnya.
 
     Dipanggil dari luar (inference/data_state.py) saat data terbukti
-    bertambah - lihat docstring _fleet_snapshot().
+    bertambah - lihat docstring _fleet_snapshot(). Sekaligus membuang potret
+    local density item_type (_item_type_density_snapshot) - sumber datanya
+    sama (cycles/events/episodes), jadi basi bersamaan.
     """
-    global _FLEET
+    global _FLEET, _ITEM_TYPE_DENSITY
     _FLEET = None
+    _ITEM_TYPE_DENSITY = None
 
 
 # Nama publik untuk pemanggil di luar modul ini (inference/, batch scoring) -
 # implementasinya tetap satu, tidak diduplikasi.
 load_model = _load_model
 fleet_snapshot = _fleet_snapshot
+item_type_density_snapshot = _item_type_density_snapshot
 risk_level = _risk_level
 
 

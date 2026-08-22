@@ -147,6 +147,14 @@ def predict(item_id: str) -> dict:
     # punya previous_cycle_count RAW (dipakai survival sendiri) - tinggal
     # di-log1p.
     observations["log_previous_cycle_count"] = np.log1p(observations["previous_cycle_count"].astype(float))
+    # Sama, compute_features() butuh LOCAL_DENSITY_FEATURES ada. Landmark di
+    # sini SELALU "sekarang" - pakai potret cache milik CatBoost
+    # (predict_failure.item_type_density_snapshot), BUKAN dihitung ulang
+    # fleet-wide (itu justru bug latency yang sudah diperbaiki di predict()
+    # - lihat komentar attach_fleet_snapshot di atas).
+    observations = feature_builder.attach_item_type_density_snapshot(
+        observations, events, predict_failure.item_type_density_snapshot(dataset_max_event_on)
+    )
 
     pc = previous_cycle.audit_previous_cycle_features(cycles_for_item)
     observations = observations.merge(

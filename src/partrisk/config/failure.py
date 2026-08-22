@@ -64,8 +64,8 @@ FLEET_WINDOW_DAYS = 90
 # jarak antar-kerusakan (memburuk/membaik), dan jendela corrective 60/90 hari
 # (melengkapi 30 hari yang sudah ada). Terbukti menaikkan ROC-AUC 0,8211->
 # 0,8244, PR-AUC 0,1610->0,1884, DAN Recall/Presisi@kapasitas SEKALIGUS
-# (jarang - biasanya trade-off) pada populasi TEST yang sama - lihat
-# reports/degradation_features_experiment.md untuk metodologi lengkap.
+# (jarang - biasanya trade-off) pada populasi TEST yang sama - lihat commit
+# yang mempromosikan v3 untuk metodologi lengkap (30da7f8).
 DEGRADATION_FEATURES = [
     "log_cumulative_prior_cycle_days",
     "log_previous_cycle_count",
@@ -76,7 +76,26 @@ DEGRADATION_FEATURES = [
     "log_prior_corrective_90d",
 ]
 
-FEATURE_COLUMNS = CATEGORICAL_FEATURES + NUMERIC_FEATURES + FLEET_FEATURES + DEGRADATION_FEATURES
+# --- Local failure density per item_type_at_install (features/fleet.py
+# attach_item_type_density) --------------------------------------------
+#
+# Generalisasi FLEET_FEATURES (yang per item_model_code_clean) ke kategori
+# lebih luas. Terbukti menaikkan ROC-AUC 0,8244->0,8319, PR-AUC 0,1884->
+# 0,1961, Brier turun, Recall/Presisi@kapasitas tidak turun - lihat
+# reports/local_density_experiment.md. Dimensi client/place DICOBA dan
+# DITOLAK di laporan yang sama (client murni merugikan, kombinasi
+# client+place gagal gerbang PR-AUC) - jangan ditambahkan tanpa bukti baru.
+LOCAL_DENSITY_FEATURES = [
+    "log_item_type_failures_90d",
+    "item_type_failure_rate_90d",
+    "log_item_type_failures_180d",
+    "item_type_failure_rate_180d",
+]
+
+FEATURE_COLUMNS = (
+    CATEGORICAL_FEATURES + NUMERIC_FEATURES + FLEET_FEATURES
+    + DEGRADATION_FEATURES + LOCAL_DENSITY_FEATURES
+)
 
 # --- Target dan observasi ---------------------------------------------------
 # Target: PART mengalami failure onset dalam 30 hari SETELAH observation_on.

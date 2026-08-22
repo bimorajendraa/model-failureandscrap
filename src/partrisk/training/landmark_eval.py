@@ -82,6 +82,10 @@ def build_landmark_features_at_observation(
     # (dipakai survival sendiri, nama BEDA sengaja - lihat
     # DYNAMIC_EXTRA_NUMERIC_COLUMNS) - tinggal di-log1p, bukan dihitung ulang.
     landmarks["log_previous_cycle_count"] = np.log1p(landmarks["previous_cycle_count"].astype(float))
+    # Sama, LOCAL_DENSITY_FEATURES (item_type density) - landmark di sini
+    # BANYAK titik waktu berbeda (bukan cuma "sekarang"), jadi pakai versi
+    # point-in-time langsung (bukan snapshot beku satu titik waktu).
+    landmarks = feature_builder.attach_item_type_density(landmarks, events, cycles, episodes)
 
     # JEBAKAN #2: support DIBEKUKAN dari metadata.json (hasil training),
     # dipetakan persis seperti predict/survival.py - TIDAK dihitung ulang
