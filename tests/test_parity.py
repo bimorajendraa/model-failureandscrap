@@ -94,6 +94,31 @@ def test_median_days_to_failure_batch_sama_dengan_single(sample):
                 )
 
 
+def test_survival_calibrated_risk_monoton_naik(sample):
+    """Fase R1 upgrade RSF: risk per horizon dikalibrasi isotonic SENDIRI-
+    SENDIRI per horizon (fit_calibrators()), yang BISA saling silang walau
+    S(t) mentahnya monoton turun - _calibrate_risk() WAJIB menegakkan cummax
+    30->60->90->120. Test ini menegakkan invariant itu tetap benar di jalur
+    production (predict()), bukan cuma di unit test fungsi kalibrasinya
+    sendiri - pola sama dengan monotonisitas kalibrasi CatBoost."""
+    try:
+        predict_survival.load_model()
+    except FileNotFoundError:
+        pytest.skip("model survival belum dilatih (survival_model/event_based/artifacts/)")
+
+    checked_any = False
+    for _, row in sample.iterrows():
+        result = predict_survival.predict(row["item_id"])
+        values = [result[f"calibrated_risk_{h}d"] for h in predict_survival.HORIZONS_DAYS]
+        if any(v is None for v in values):
+            continue  # beyond_training_followup atau calibrators None - tidak ada yang ditegakkan
+        checked_any = True
+        for a, b in zip(values, values[1:]):
+            assert a <= b + 1e-9, f"{row['item_id']}: calibrated_risk turun {values}"
+    if not checked_any:
+        pytest.skip("tidak ada sample dengan calibrated_risk terisi untuk diuji")
+
+
 def test_kolom_mentah_scrap_batch_sama_dengan_current_state(batch, sample):
     """Penyusun kolom scrap versi batch harus setara current_state().
 

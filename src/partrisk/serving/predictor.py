@@ -99,6 +99,7 @@ def _survival_advisory_fields(item_id: str) -> dict:
     belum dilatih, PART tidak scorable model survival meski scorable
     CatBoost, dll) menghasilkan field kosong dengan alasan, bukan exception
     yang menjalar ke get_part_assessment()."""
+    empty_risk = {f"survival_risk_{h}d": None for h in predict_survival.HORIZONS_DAYS}
     try:
         result = predict_survival.predict(item_id)
     except predict_survival.ItemNotScorable as error:
@@ -110,6 +111,8 @@ def _survival_advisory_fields(item_id: str) -> dict:
             "curve_step_days": None,
             "curve_horizon_days": None,
             "curve_is_calibrated": False,
+            **empty_risk,
+            "survival_risk_is_calibrated": False,
         }
     except (Exception, SystemExit) as error:  # noqa: BLE001 - lihat docstring: advisory, tidak boleh menjalar
         return {
@@ -120,8 +123,20 @@ def _survival_advisory_fields(item_id: str) -> dict:
             "curve_step_days": None,
             "curve_horizon_days": None,
             "curve_is_calibrated": False,
+            **empty_risk,
+            "survival_risk_is_calibrated": False,
         }
     curve = result["estimated_survival_curve_from_now"]
+    # Fase R1 upgrade RSF: risk per horizon DIKALIBRASI (isotonic per
+    # 30/60/90/120 + cummax, lihat predict_survival._calibrate_risk()) -
+    # kurva S(t) penuh (survival_curve) TETAP mentah (curve_is_calibrated
+    # tetap False dengan sengaja: kalibrator cuma dilatih di 4 titik
+    # horizon, mengekstrapolasi ke SELURUH kurva 0-1080 hari akan mengarang
+    # angka di luar titik yang benar-benar divalidasi).
+    calibrated_risk = {
+        f"survival_risk_{h}d": result.get(f"calibrated_risk_{h}d")
+        for h in predict_survival.HORIZONS_DAYS
+    }
     return {
         "median_days_to_failure": result["median_days_remaining_from_now"],
         "median_days_to_failure_basis": (
@@ -133,6 +148,8 @@ def _survival_advisory_fields(item_id: str) -> dict:
         "curve_step_days": predict_survival.CURVE_STEP_DAYS,
         "curve_horizon_days": curve[-1]["days_from_now"] if curve else None,
         "curve_is_calibrated": False,
+        **calibrated_risk,
+        "survival_risk_is_calibrated": any(v is not None for v in calibrated_risk.values()),
     }
 
 

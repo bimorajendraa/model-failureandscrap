@@ -76,6 +76,16 @@ class FailurePrediction(BaseModel):
     curve_step_days: int | None = None
     curve_horizon_days: int | None = None
     curve_is_calibrated: bool = False
+    # Peluang kerusakan per horizon dari model survival (BEDA dari
+    # failure_probability_* di atas - model TERPISAH), dikalibrasi isotonic
+    # per horizon + cummax (Fase R1 upgrade RSF). survival_risk_is_calibrated
+    # menandai apakah field ini benar-benar terisi kalibrasi (False kalau
+    # model survival tidak scorable/tidak tersedia - lihat median_days_to_failure_basis).
+    survival_risk_30d: float | None = Field(default=None, ge=0.0, le=1.0)
+    survival_risk_60d: float | None = Field(default=None, ge=0.0, le=1.0)
+    survival_risk_90d: float | None = Field(default=None, ge=0.0, le=1.0)
+    survival_risk_120d: float | None = Field(default=None, ge=0.0, le=1.0)
+    survival_risk_is_calibrated: bool = False
 
 
 class ScrapPrediction(BaseModel):

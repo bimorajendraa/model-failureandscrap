@@ -273,7 +273,10 @@ def _score_survival_advisory(
     di sini, satu-satunya tempat error model survival ditelan sengaja)."""
     item_ids = full_snapshot["item_identifier_clean"].to_numpy()
     try:
-        model, encoder, metadata = predict_survival.load_model()
+        # calibrators tidak dipakai di sini - score_batch() cuma menghasilkan
+        # median_days_to_failure/days_until_survival_90pct (turunan kurva,
+        # bukan risk per horizon) - lihat predict/survival.py load_model().
+        model, encoder, metadata, _calibrators = predict_survival.load_model()
     except FileNotFoundError:
         return pd.DataFrame({
             "item_id": item_ids,

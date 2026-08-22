@@ -56,12 +56,20 @@ class ItemNotScorable(Exception):
 
 
 def load_model() -> tuple:
-    """Model utama (RSF) + encoder + metadata mentah - dipakai `score_batch()`
-    (serving/batch_predictor.py) dan `_load_primary_model()` di bawah (CLI
-    satu PART). Melempar FileNotFoundError (BUKAN SystemExit) supaya
-    pemanggil library (batch_predictor) bisa menangkapnya dan melewati field
-    advisory dengan aman kalau model belum pernah dilatih - CLI satu PART
-    (`main()`) yang menampilkan pesan SystemExit ke pengguna."""
+    """Model utama (RSF) + encoder + metadata mentah + kalibrator per horizon
+    - dipakai `score_batch()` (serving/batch_predictor.py) dan
+    `_load_primary_model()` di bawah (CLI satu PART). Melempar
+    FileNotFoundError (BUKAN SystemExit) supaya pemanggil library
+    (batch_predictor) bisa menangkapnya dan melewati field advisory dengan
+    aman kalau model belum pernah dilatih - CLI satu PART (`main()`) yang
+    menampilkan pesan SystemExit ke pengguna.
+
+    `calibrators` (dict[int, IsotonicRegression] per horizon 30/60/90/120,
+    dilatih training.failure_survival.fit_calibrators() di populasi
+    VALIDATION) SELALU dimuat kalau filenya ada - artifact yang sudah
+    dilatih sejak Fase A3 selalu punya file ini (lihat
+    gate_a3_calibration_study.md), jadi None di sini menandakan artifact
+    versi sangat lama, bukan kondisi normal."""
     if not (ARTIFACTS_DIR / "models.joblib").exists():
         raise FileNotFoundError(f"Artifacts belum ada di {ARTIFACTS_DIR}")
     models = joblib.load(ARTIFACTS_DIR / "models.joblib")
@@ -70,12 +78,14 @@ def load_model() -> tuple:
     if hasattr(model, "n_jobs"):
         model.n_jobs = 1  # lihat catatan scripts/evaluate_survival.py load_artifacts()
     encoder = joblib.load(ARTIFACTS_DIR / "encoder.joblib")
-    return model, encoder, metadata
+    calibrators_path = ARTIFACTS_DIR / "calibrators.joblib"
+    calibrators = joblib.load(calibrators_path) if calibrators_path.exists() else None
+    return model, encoder, metadata, calibrators
 
 
 def _load_primary_model():
     try:
-        model, encoder, metadata = load_model()
+        model, encoder, metadata, calibrators = load_model()
     except FileNotFoundError as exc:
         raise SystemExit(
             f"Model event-based belum dilatih. Jalankan dulu: "
@@ -84,13 +94,41 @@ def _load_primary_model():
     support_totals = {k: int(v) for k, v in metadata["support_totals"].items()}
     item_type_support_totals = {k: int(v) for k, v in metadata["item_type_support_totals"].items()}
     terminal_support_totals = {k: int(v) for k, v in metadata["terminal_support_totals"].items()}
-    return model, metadata["primary_model"], encoder, support_totals, item_type_support_totals, terminal_support_totals
+    return (
+        model, metadata["primary_model"], encoder, support_totals,
+        item_type_support_totals, terminal_support_totals, calibrators,
+    )
+
+
+def _calibrate_risk(raw_risk: dict[int, float], calibrators) -> dict[int, float | None]:
+    """Kalibrasi tiap horizon SENDIRI-SENDIRI (isotonic terpisah per horizon,
+    lihat fit_calibrators()), lalu cummax lintas horizon 30->120 -
+    tanggung jawab PEMANGGIL kalibrator (didokumentasikan di
+    fit_calibrators()) karena isotonic per horizon BISA saling silang walau
+    S(t) mentahnya monoton turun (gate_a3_calibration_study.md). Kalau
+    calibrators None (artifact lama) atau nilai raw None (beyond follow-up),
+    kembalikan None apa adanya - tidak mengarang angka."""
+    if calibrators is None:
+        return {h: None for h in raw_risk}
+    ordered_horizons = sorted(raw_risk)
+    calibrated: dict[int, float | None] = {}
+    running_max = 0.0
+    for h in ordered_horizons:
+        raw = raw_risk[h]
+        if raw is None or h not in calibrators:
+            calibrated[h] = None
+            continue
+        value = float(calibrators[h].predict([raw])[0])
+        running_max = max(running_max, value)
+        calibrated[h] = round(running_max, 4)
+    return calibrated
 
 
 def predict(item_id: str) -> dict:
-    model, model_name, encoder, support_totals, item_type_support_totals, terminal_support_totals = (
-        _load_primary_model()
-    )
+    (
+        model, model_name, encoder, support_totals,
+        item_type_support_totals, terminal_support_totals, calibrators,
+    ) = _load_primary_model()
 
     dataset_max_event_on = data_reader.get_dataset_max_event_on()
     # Positional (bukan keyword) SENGAJA - query_cache.py mencocokkan cache
@@ -183,12 +221,19 @@ def predict(item_id: str) -> dict:
     # 1-S(N) LANGSUNG, tidak perlu dibagi S(age) seperti model baseline-instalasi.
     beyond_training_followup = bool(times_grid.max() <= 0)
     if beyond_training_followup:
-        risk = {f"risk_{h}d": None for h in HORIZONS_DAYS}
+        raw_risk = {h: None for h in HORIZONS_DAYS}
     else:
-        risk = {
-            f"risk_{h}d": round(1.0 - curves.eval_survival_at(times_grid, curve, float(h)), 4)
+        raw_risk = {
+            h: 1.0 - curves.eval_survival_at(times_grid, curve, float(h))
             for h in HORIZONS_DAYS
         }
+    risk = {f"risk_{h}d": (round(v, 4) if v is not None else None) for h, v in raw_risk.items()}
+    # Kalibrasi horizon (Fase R1 upgrade RSF - lihat _calibrate_risk()) -
+    # isotonic per horizon dari fit_calibrators(), TERPISAH dari risk_Nd
+    # mentah di atas supaya kejujuran "ini sudah dikalibrasi atau belum"
+    # tetap eksplisit lewat nama field, bukan ditimpa diam-diam.
+    calibrated = _calibrate_risk(raw_risk, calibrators)
+    calibrated_risk = {f"calibrated_risk_{h}d": calibrated[h] for h in HORIZONS_DAYS}
     median_days_remaining = curves.median_survival_time(times_grid, curve)
     # median SERING None (kebanyakan PART aktif belum cukup lama untuk S(t)
     # turun sampai separuh dalam rentang follow-up training - diukur lewat
@@ -211,6 +256,7 @@ def predict(item_id: str) -> dict:
         "as_of": str(dataset_max_event_on),
         "age_days": round(age_days, 1),
         **risk,
+        **calibrated_risk,
         "median_days_remaining_from_now": (
             round(median_days_remaining, 1) if median_days_remaining is not None else None
         ),
