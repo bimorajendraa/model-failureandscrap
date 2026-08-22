@@ -81,16 +81,29 @@ di test ini - kompatibel, tidak perlu upgrade.
 
 ## G8: reproduksibilitas lintas snapshot DB
 
-**BELUM diukur di sini - DITUNDA ke Fase C, bukan diabaikan.** A2/A3 sengaja
-memakai `SURVIVAL_BUILD_CACHE` (dataset event-based dari cache lokal) untuk
-kecepatan pencarian hyperparameter - itu valid untuk MENCARI konfigurasi
-(bukan mengevaluasi keputusan fitur, beda dengan pelajaran
-`reports/short_window.md`), tapi belum membuktikan reproduksibilitas lintas
-pembacaan DB fresh. Setiap skrip A2/A3 mencatat ini eksplisit di output:
-*"konfigurasi terpilih WAJIB dilatih ulang dari DB fresh sebelum jadi
-artifact produksi"*. Karena keputusan di sini sudah "tidak cutover", G8 jadi
-syarat SEBELUM model compact ini benar-benar di-ship sebagai artifact
-`v3` (Fase C), bukan syarat gerbang hari ini.
+**LULUS - diukur setelah Fase C3 (retrain produksi), ditutup 2026-08-22.**
+`python -m partrisk.training.failure_survival` (TANPA `SURVIVAL_BUILD_CACHE`
+- baca DB fresh murni) dijalankan DUA KALI berturut-turut dan dibandingkan
+penuh, bukan cuma disampel:
+
+| | Run 1 (dadc17f, 2026-08-21) | Run 2 (2026-08-22) | Match |
+|---|---|---|---|
+| `data_end` | 2026-08-03 11:07:22 | 2026-08-03 11:07:22 | sama (DB belum bertambah antar dua run) |
+| `rows_by_split` | TRAIN=92.298 VALIDATION=5.540 TEST=4.890 | identik | sama |
+| RSF C-index VAL/TEST | 0,841674 / 0,862468 | 0,841674 / 0,862468 | **BIT-IDENTIK** (diff=0,00000000) |
+| RSF IBS, Brier@30/60/90/120, AUC@30/60/90/120 (VAL+TEST) | - | - | **semua BIT-IDENTIK**, bukan cuma sama 4 desimal |
+| Cox PH (sama 10 metrik di atas) | - | - | **semua BIT-IDENTIK** |
+
+Kedua run dibandingkan lewat perbandingan numerik langsung tiap field
+`evaluation_metrics_full_landmark_rows`, bukan pembacaan visual - lihat riwayat
+commit yang menutup G8 ini. Karena `data_end` sama persis di kedua run (DB
+tidak bertambah di antara keduanya), hasil ini secara ketat membuktikan
+**pipeline deterministik untuk state DB yang sama** (tidak ada randomness
+tak-terkendali di landmark sampling/pembangunan fitur/urutan pemrosesan) -
+BUKAN bukti stabilitas lintas snapshot DB yang benar-benar berbeda (itu baru
+teruji kalau kebetulan/sengaja dijalankan ulang setelah DB bertambah). Tetap
+menutup risiko utama yang dikhawatirkan G8: kesimpulan yang kebetulan cocok
+satu snapshot data karena proses trainingnya sendiri tidak stabil.
 
 ## Konfigurasi pemenang (dicatat untuk Fase C)
 
