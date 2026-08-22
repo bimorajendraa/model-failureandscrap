@@ -72,6 +72,14 @@ class FailurePrediction(BaseModel):
     median_days_to_failure: float | None = None
     median_days_to_failure_basis: str | None = None
     days_until_survival_90pct: float | None = None
+    # Langkah C (rencana upgrade RSF - median 50% sering None/kasar): hari
+    # sampai risiko kumulatif versi RSF (kurva terkalibrasi) mencapai ambang
+    # yang SAMA dengan MEDIUM/HIGH CatBoost (config.FAILURE_MEDIUM/HIGH_
+    # PROBABILITY_THRESHOLD, 0,15/0,25) - bukan cross-reference ke
+    # failure_probability_30d (model TERPISAH), cuma skalanya disamakan
+    # supaya gampang dipahami dibanding median 50% yang sering kosong.
+    days_until_risk_medium: float | None = None
+    days_until_risk_high: float | None = None
     survival_curve: list[SurvivalPoint] | None = None
     curve_step_days: int | None = None
     curve_horizon_days: int | None = None
@@ -201,6 +209,8 @@ class PriorityItem(BaseModel):
     # docstring _score_survival_advisory() soal ukuran payload daftar.
     median_days_to_failure: float | None = None
     days_until_survival_90pct: float | None = None
+    days_until_risk_medium: float | None = None
+    days_until_risk_high: float | None = None
 
 
 class ScoredAt(BaseModel):

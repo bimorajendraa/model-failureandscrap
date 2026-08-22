@@ -246,6 +246,18 @@ def predict(item_id: str) -> dict:
     # jauh lebih sering tercapai dan tetap actionable, lihat survival.curves
     # docstring. % null diukur di reports/rsf_median_curve_baseline.md.
     days_until_90pct_remaining = curves.survival_time_at_threshold(times_grid, curve_calibrated, 0.9)
+    # Langkah C (rencana upgrade RSF - median 50% sering None/kasar, ambang
+    # ini SELALU pakai skala risiko yang sudah dikenal user dari CatBoost
+    # (config.FAILURE_MEDIUM/HIGH_PROBABILITY_THRESHOLD, 0,15/0,25) - "kapan
+    # kira-kira risiko versi RSF ini masuk MEDIUM/HIGH", bukan cross-reference
+    # ke failure_probability_30d CatBoost (model TERPISAH, lihat docstring
+    # modul) - cuma ambangnya yang disamakan supaya gampang dipahami.
+    days_until_risk_medium = curves.survival_time_at_threshold(
+        times_grid, curve_calibrated, 1.0 - config.FAILURE_MEDIUM_PROBABILITY_THRESHOLD
+    )
+    days_until_risk_high = curves.survival_time_at_threshold(
+        times_grid, curve_calibrated, 1.0 - config.FAILURE_HIGH_PROBABILITY_THRESHOLD
+    )
 
     curve_days = list(range(0, int(min(times_grid.max(), CURVE_MAX_DAYS)) + 1, CURVE_STEP_DAYS))
     curve_points = [
@@ -268,6 +280,12 @@ def predict(item_id: str) -> dict:
         ),
         "days_until_survival_90pct_from_now": (
             round(days_until_90pct_remaining, 1) if days_until_90pct_remaining is not None else None
+        ),
+        "days_until_risk_medium_from_now": (
+            round(days_until_risk_medium, 1) if days_until_risk_medium is not None else None
+        ),
+        "days_until_risk_high_from_now": (
+            round(days_until_risk_high, 1) if days_until_risk_high is not None else None
         ),
         "estimated_survival_curve_from_now": curve_points,
         "curve_is_calibrated": calibrators is not None,
@@ -311,6 +329,8 @@ def score_batch(
     n = len(feature_frame)
     median_days = np.full(n, np.nan)
     days_until_90pct = np.full(n, np.nan)
+    days_until_medium = np.full(n, np.nan)
+    days_until_high = np.full(n, np.nan)
     n_chunks = math.ceil(n / BATCH_CHUNK_SIZE)
     for i in range(n_chunks):
         lo, hi = i * BATCH_CHUNK_SIZE, min((i + 1) * BATCH_CHUNK_SIZE, n)
@@ -323,12 +343,23 @@ def score_batch(
             median_days[lo + k] = np.nan if median is None else median
             at_90pct = curves.survival_time_at_threshold(times_grid, curve_values_used[k], 0.9)
             days_until_90pct[lo + k] = np.nan if at_90pct is None else at_90pct
+            # Langkah C - lihat komentar di predict() untuk alasan ambangnya.
+            at_medium = curves.survival_time_at_threshold(
+                times_grid, curve_values_used[k], 1.0 - config.FAILURE_MEDIUM_PROBABILITY_THRESHOLD
+            )
+            days_until_medium[lo + k] = np.nan if at_medium is None else at_medium
+            at_high = curves.survival_time_at_threshold(
+                times_grid, curve_values_used[k], 1.0 - config.FAILURE_HIGH_PROBABILITY_THRESHOLD
+            )
+            days_until_high[lo + k] = np.nan if at_high is None else at_high
         del curve_values, curve_values_used
 
     return pd.DataFrame({
         "item_id": rows["item_identifier_clean"].to_numpy(),
         "median_days_to_failure": median_days,
         "days_until_survival_90pct": days_until_90pct,
+        "days_until_risk_medium": days_until_medium,
+        "days_until_risk_high": days_until_high,
     })
 
 

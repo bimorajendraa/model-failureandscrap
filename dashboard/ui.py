@@ -261,12 +261,16 @@ def survival_advisory(failure: dict) -> None:
 
     median_days_to_failure SERING kosong (S(t) jarang turun sampai separuh
     dalam rentang follow-up training - lihat median_days_to_failure_basis) -
-    days_until_survival_90pct jauh lebih sering terisi, ditampilkan
+    days_until_risk_medium/high (Langkah C rencana upgrade RSF - ambang SAMA
+    dengan MEDIUM/HIGH CatBoost, 15%/25%) jauh lebih sering terisi, ditampilkan
     berdampingan supaya halaman tetap berguna walau median kosong.
     """
     median = failure.get("median_days_to_failure")
     at_90pct = failure.get("days_until_survival_90pct")
+    at_medium = failure.get("days_until_risk_medium")
+    at_high = failure.get("days_until_risk_high")
     curve = failure.get("survival_curve")
+    curve_is_calibrated = failure.get("curve_is_calibrated", False)
 
     left, right = st.columns(2)
     left.metric("Perkiraan sisa umur (median)", days_label(median))
@@ -274,15 +278,28 @@ def survival_advisory(failure: dict) -> None:
         left.caption(failure["median_days_to_failure_basis"])
     right.metric("Mulai naik dari kondisi sekarang", days_label(at_90pct))
 
+    medium_col, high_col = st.columns(2)
+    medium_col.metric("Hari sampai risiko masuk MEDIUM (15%)", days_label(at_medium))
+    high_col.metric("Hari sampai risiko masuk HIGH (25%)", days_label(at_high))
+
     if curve:
         chart_data = pd.DataFrame(curve).rename(
             columns={"days_from_now": "Hari dari sekarang", "survival_probability": "Peluang belum rusak"}
         ).set_index("Hari dari sekarang")
         st.line_chart(chart_data, y="Peluang belum rusak")
 
-    st.caption(
-        "Model TERPISAH dari risiko kerusakan 30/60/90/120 hari di atas - tidak dipakai "
-        "menentukan risiko atau rekomendasi. Kurva S(t) BELUM dikalibrasi "
-        "(curve_is_calibrated=false): bacalah sebagai kecenderungan relatif, bukan "
-        "probabilitas presisi."
-    )
+    if curve_is_calibrated:
+        st.caption(
+            "Model TERPISAH dari risiko kerusakan 30/60/90/120 hari di atas - tidak dipakai "
+            "menentukan risiko atau rekomendasi. Kurva S(t) sudah dikalibrasi (isotonic per "
+            "horizon 30-120 hari + interpolasi) - di luar rentang itu (median yang sangat "
+            "panjang) hasilnya masih cenderung terlalu optimis, bacalah sebagai perkiraan "
+            "kasar, bukan angka presisi."
+        )
+    else:
+        st.caption(
+            "Model TERPISAH dari risiko kerusakan 30/60/90/120 hari di atas - tidak dipakai "
+            "menentukan risiko atau rekomendasi. Kurva S(t) BELUM dikalibrasi "
+            "(curve_is_calibrated=false): bacalah sebagai kecenderungan relatif, bukan "
+            "probabilitas presisi."
+        )

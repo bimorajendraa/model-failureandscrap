@@ -84,6 +84,8 @@ def test_median_days_to_failure_batch_sama_dengan_single(sample):
         for batch_column, single_key in (
             ("median_days_to_failure", "median_days_remaining_from_now"),
             ("days_until_survival_90pct", "days_until_survival_90pct_from_now"),
+            ("days_until_risk_medium", "days_until_risk_medium_from_now"),
+            ("days_until_risk_high", "days_until_risk_high_from_now"),
         ):
             expected, actual = single[single_key], row[batch_column]
             if expected is None:
@@ -116,6 +118,33 @@ def test_survival_kurva_terkalibrasi_monoton_turun_dan_flag_benar(sample):
         probs = [point["survival_probability"] for point in curve]
         assert all(0.0 - 1e-9 <= p <= 1.0 + 1e-9 for p in probs)
         assert all(a >= b - 1e-9 for a, b in zip(probs, probs[1:]))
+
+
+def test_survival_urutan_ambang_waktu_konsisten(sample):
+    """Langkah C: days_until_survival_90pct (S<=0,9) harus tercapai LEBIH
+    DULU (hari lebih kecil) daripada days_until_risk_medium (S<=0,85),
+    yang harus lebih dulu dari days_until_risk_high (S<=0,75) - S(t) monoton
+    turun, jadi ambang yang lebih dalam PASTI butuh waktu >= ambang yang
+    lebih dangkal. Hanya dibandingkan kalau KEDUANYA terisi (bukan None)."""
+    try:
+        predict_survival.load_model()
+    except FileNotFoundError:
+        pytest.skip("model survival belum dilatih (survival_model/event_based/artifacts/)")
+
+    checked_any = False
+    for _, row in sample.iterrows():
+        result = predict_survival.predict(row["item_id"])
+        p90 = result["days_until_survival_90pct_from_now"]
+        medium = result["days_until_risk_medium_from_now"]
+        high = result["days_until_risk_high_from_now"]
+        if p90 is not None and medium is not None:
+            checked_any = True
+            assert p90 <= medium + 1e-9, (row["item_id"], p90, medium)
+        if medium is not None and high is not None:
+            checked_any = True
+            assert medium <= high + 1e-9, (row["item_id"], medium, high)
+    if not checked_any:
+        pytest.skip("tidak ada sample dengan pasangan ambang terisi untuk diuji")
 
 
 def test_survival_calibrated_risk_monoton_naik(sample):

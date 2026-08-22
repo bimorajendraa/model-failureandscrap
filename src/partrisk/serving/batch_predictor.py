@@ -279,6 +279,8 @@ def _score_survival_advisory(
             "item_id": item_ids,
             "median_days_to_failure": np.nan,
             "days_until_survival_90pct": np.nan,
+            "days_until_risk_medium": np.nan,
+            "days_until_risk_high": np.nan,
         })
     return predict_survival.score_batch(
         full_snapshot, events, cycles, episodes, terminal_raw, model, encoder, metadata, calibrators
