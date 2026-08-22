@@ -141,6 +141,12 @@ def predict(item_id: str) -> dict:
     # (riwayat PART INI saja, sudah diambil di atas) daripada seluruh armada,
     # baris item lain tidak pernah mempengaruhi hasil baris item ini.
     observations = features.attach_dynamic_extra(observations, cycles_for_item, events)
+    # compute_features() di bawah memanggil feature_builder.build_features()
+    # sebagai utilitas bersama - butuh log_previous_cycle_count
+    # (config.DEGRADATION_FEATURES). attach_dynamic_extra() di atas sudah
+    # punya previous_cycle_count RAW (dipakai survival sendiri) - tinggal
+    # di-log1p.
+    observations["log_previous_cycle_count"] = np.log1p(observations["previous_cycle_count"].astype(float))
 
     pc = previous_cycle.audit_previous_cycle_features(cycles_for_item)
     observations = observations.merge(

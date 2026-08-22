@@ -10,7 +10,8 @@ komentar di masing-masing konstanta.
 
 from __future__ import annotations
 
-# --- Fitur final model (18 fitur, urutan wajib sama seperti saat training) ----
+# --- Fitur final model (28 fitur = 21 asli + 7 fitur degradasi baru di
+# bawah - lihat DEGRADATION_FEATURES) ------------------------------------
 CATEGORICAL_FEATURES = [
     "part_model_category",
     "client_category",
@@ -56,7 +57,26 @@ FLEET_FEATURES = [
 # Jendela waktu untuk menghitung laju kerusakan armada.
 FLEET_WINDOW_DAYS = 90
 
-FEATURE_COLUMNS = CATEGORICAL_FEATURES + NUMERIC_FEATURES + FLEET_FEATURES
+# --- Fitur degradasi (dibawa dari model event-based, features/history.py
+# attach_degradation_history) -------------------------------------------
+#
+# Umur fisik kumulatif siklus SEBELUMNYA (bukan cuma siklus berjalan), tren
+# jarak antar-kerusakan (memburuk/membaik), dan jendela corrective 60/90 hari
+# (melengkapi 30 hari yang sudah ada). Terbukti menaikkan ROC-AUC 0,8211->
+# 0,8244, PR-AUC 0,1610->0,1884, DAN Recall/Presisi@kapasitas SEKALIGUS
+# (jarang - biasanya trade-off) pada populasi TEST yang sama - lihat
+# reports/degradation_features_experiment.md untuk metodologi lengkap.
+DEGRADATION_FEATURES = [
+    "log_cumulative_prior_cycle_days",
+    "log_previous_cycle_count",
+    "has_failure_interval_trend",
+    "log_failure_interval_mean_days",
+    "failure_interval_trend_ratio",
+    "log_prior_corrective_60d",
+    "log_prior_corrective_90d",
+]
+
+FEATURE_COLUMNS = CATEGORICAL_FEATURES + NUMERIC_FEATURES + FLEET_FEATURES + DEGRADATION_FEATURES
 
 # --- Target dan observasi ---------------------------------------------------
 # Target: PART mengalami failure onset dalam 30 hari SETELAH observation_on.

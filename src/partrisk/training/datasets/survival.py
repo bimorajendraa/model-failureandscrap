@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 
 import joblib
+import numpy as np
 import pandas as pd
 
 from partrisk import config
@@ -103,6 +104,12 @@ def build() -> dict:
     # cumulative physical usage + jendela corrective 60/90 hari (konfigurasi
     # G_combined_without_device, VAL t0-only 0,7849 -> 0,7954).
     landmarks = features.attach_dynamic_extra(landmarks, cycles, events)
+    # compute_features() di bawah memanggil feature_builder.build_features()
+    # sebagai utilitas bersama - butuh log_previous_cycle_count
+    # (config.DEGRADATION_FEATURES). attach_dynamic_extra() di atas sudah
+    # punya previous_cycle_count RAW (dipakai survival sendiri) - tinggal
+    # di-log1p.
+    landmarks["log_previous_cycle_count"] = np.log1p(landmarks["previous_cycle_count"].astype(float))
 
     feature_frame = features.compute_features(landmarks, support, item_type_support, terminal_support)
 

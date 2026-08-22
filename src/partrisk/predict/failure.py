@@ -147,6 +147,11 @@ def predict(item_id: str) -> dict:
 
     events = data_reader.get_events(item_id)
     snapshot = feature_builder.attach_history(snapshot, events)
+    # Fitur degradasi butuh riwayat siklus/event, tapi HANYA milik PART ini
+    # sendiri - cumulative_cycle_age dkk. group-by item_identifier_clean
+    # secara internal, jadi cukup `cycles` per-item yang sudah diambil di
+    # atas (bukan seluruh armada seperti attach_fleet_snapshot di bawah).
+    snapshot = feature_builder.attach_degradation_history(snapshot, cycles, events)
     # Kondisi armada butuh riwayat SELURUH model PART, bukan hanya PART ini -
     # potretnya dibaca sekali per proses lalu dipakai ulang.
     snapshot = feature_builder.attach_fleet_snapshot(snapshot, _fleet_snapshot(data_end))
@@ -160,6 +165,13 @@ def predict(item_id: str) -> dict:
     cumulative_risk: dict[int, float] = {}
     for step in range(steps):
         features = feature_builder.project_features(snapshot, support, step)
+        # build_features()/project_features() SELALU mengembalikan
+        # config.FEATURE_COLUMNS (skema TERKINI, global) - model yang benar-
+        # benar CURRENT bisa saja versi lama dengan daftar fitur lebih
+        # sempit (metadata["features"]). Persempit dulu di sini - kalau
+        # tidak, CatBoost diam-diam menerima kolom lebih banyak dari yang
+        # dilihatnya saat training (kegagalan senyap, bukan error).
+        features = features[metadata["features"]]
         raw = float(model.predict_proba(features)[:, 1][0])
         hazard = float(calibrator.predict([raw])[0])
         survival *= 1.0 - hazard

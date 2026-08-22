@@ -163,8 +163,9 @@ def _score_failure(
     """Perantaian hazard yang sama seperti predict(), untuk semua PART aktif.
 
     Urutan panggilannya sengaja dibuat identik dengan predict.predict():
-    current_observations -> attach_history -> attach_fleet_snapshot ->
-    part_model_support -> project_features per langkah 30 hari.
+    current_observations -> attach_history -> attach_degradation_history ->
+    attach_fleet_snapshot -> part_model_support -> project_features per
+    langkah 30 hari.
 
     Mengembalikan TIGA hal: skor, nilai fitur mentahnya (dipakai halaman
     detail untuk menjelaskan faktor risiko - fitur itu sudah dihitung di sini,
@@ -178,6 +179,7 @@ def _score_failure(
 
     snapshot = feature_builder.current_observations(cycles)
     snapshot = feature_builder.attach_history(snapshot, events)
+    snapshot = feature_builder.attach_degradation_history(snapshot, cycles, events)
     snapshot = feature_builder.attach_fleet_snapshot(
         snapshot, failure_model.fleet_snapshot(data_end)
     )
@@ -195,6 +197,11 @@ def _score_failure(
     cumulative: dict[int, np.ndarray] = {}
     for step in range(steps):
         features = feature_builder.project_features(snapshot, support, step)
+        # Sama seperti predict/failure.py: persempit ke fitur milik model
+        # yang benar-benar CURRENT (metadata["features"]) - build_features()
+        # selalu mengembalikan skema TERKINI, bisa lebih lebar dari model
+        # lama yang sedang production.
+        features = features[metadata["features"]]
         raw = model.predict_proba(features)[:, 1]
         if step == 0:
             tier_score = raw
@@ -223,7 +230,16 @@ def _score_failure(
     features_by_item.index = pd.Index(
         snapshot["item_identifier_clean"].to_numpy(), name="item_id"
     )
-    return result, features_by_item, snapshot
+    # full_snapshot dipakai ULANG oleh _score_survival_advisory(), yang
+    # membangun fiturnya SENDIRI dari nol lewat landmark_eval (termasuk
+    # attach_dynamic_extra() milik survival, yang punya nama kolom
+    # PERSIS SAMA untuk konsep yang sama - cumulative_prior_cycle_days dkk).
+    # Kalau kolom degradasi CatBoost ikut terbawa, merge/concat internal
+    # survival bentrok nama (KeyError atau kolom duplikat senyap). Buang
+    # dulu di sini - CatBoost sendiri sudah tidak butuh lagi setelah loop
+    # predict_proba() di atas selesai.
+    full_snapshot = snapshot.drop(columns=config.DEGRADATION_FEATURES)
+    return result, features_by_item, full_snapshot
 
 
 # ---------------------------------------------------------------------------

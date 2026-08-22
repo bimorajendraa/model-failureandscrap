@@ -76,6 +76,10 @@ def build_dataset() -> tuple:
     print("[2/5] Menyusun observasi 30-harian dan target...")
     observations = feature_builder.training_observations(cycles)
     observations = feature_builder.attach_history(observations, events)
+    # Fitur degradasi (umur fisik kumulatif, tren jarak antar-kerusakan,
+    # corrective 60/90d) - dibawa dari model event-based, lihat
+    # reports/degradation_features_experiment.md.
+    observations = feature_builder.attach_degradation_history(observations, cycles, events)
     # Kondisi armada dihitung point-in-time untuk tiap observasi.
     episodes = data_reader.get_failure_episodes()
     observations = feature_builder.attach_fleet(observations, cycles, episodes)
@@ -194,6 +198,14 @@ def evaluate_incumbent(previous_version: str, dataset: pd.DataFrame) -> dict:
         test_dataset, metadata["part_model_support"]
     )
     incumbent_features = feature_builder.build_features(test_dataset, incumbent_support)
+    # build_features() SELALU mengembalikan config.FEATURE_COLUMNS (skema
+    # kandidat SAAT INI, global) - incumbent lama dilatih dengan daftar
+    # fitur BEKU miliknya sendiri (metadata["features"], mis. 21 kolom
+    # sebelum fitur degradasi ditambahkan). Tanpa dipersempit ke sini,
+    # CatBoost menerima DataFrame dengan kolom tambahan yang tidak pernah
+    # dilihatnya saat training - diam-diam salah (bukan error), persis
+    # kegagalan senyap yang dikhawatirkan R6.
+    incumbent_features = incumbent_features[metadata["features"]]
 
     raw = model.predict_proba(incumbent_features)[:, 1]
     calibrated = calibrator.predict(raw)
@@ -217,6 +229,7 @@ def active_part_scores(
     """
     snapshot = feature_builder.current_observations(cycles)
     snapshot = feature_builder.attach_history(snapshot, events)
+    snapshot = feature_builder.attach_degradation_history(snapshot, cycles, events)
     snapshot = feature_builder.attach_fleet_snapshot(snapshot, fleet)
     support = feature_builder.part_model_support(snapshot, support_totals)
     features = feature_builder.build_features(snapshot, support)

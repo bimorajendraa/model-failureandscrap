@@ -94,6 +94,59 @@ def attach_history(observations: pd.DataFrame, events: pd.DataFrame) -> pd.DataF
     return observations
 
 
+def attach_degradation_history(
+    observations: pd.DataFrame, cycles: pd.DataFrame, events: pd.DataFrame
+) -> pd.DataFrame:
+    """Tambahkan riwayat degradasi point-in-time: umur fisik kumulatif siklus
+    sebelumnya, tren jarak antar-kerusakan, dan jendela corrective 60/90 hari.
+
+    Dedup sengaja - REUSE fungsi `features.survival.dynamic_history` apa
+    adanya (sudah terbukti aman point-in-time di jalur event-based), bukan
+    ditulis ulang di sini. Perbedaan satu-satunya dari pemakaian di jalur
+    survival: `cycles` boleh berupa riwayat SATU item saja (bukan seluruh
+    armada) - `cumulative_cycle_age`/`corrective_degradation_trend`/
+    `windowed_corrective_extra` semuanya group-by `item_identifier_clean`
+    secara internal, jadi baris item lain (kalau ada) tidak pernah
+    mempengaruhi hasil baris item ini (lihat predict/survival.py untuk
+    pemakaian serupa yang sudah diverifikasi bit-identik).
+
+    Terbukti menaikkan ROC-AUC/PR-AUC/Recall&Presisi@kapasitas sekaligus di
+    populasi TEST yang sama (lihat reports/degradation_features_experiment.md)
+    - bukan spekulasi.
+    """
+    from partrisk.features.survival import dynamic_history
+
+    observations = observations.reset_index(drop=True)
+    # `cumulative_cycle_age()` mengembalikan kolom RAW `cumulative_prior_cycle_days`/
+    # `previous_cycle_count` (bukan di-merge langsung ke `observations`) -
+    # jalur survival (features/survival/builder.py attach_dynamic_extra)
+    # MEMBUTUHKAN nama kolom RAW yang SAMA PERSIS untuk merge internalnya
+    # sendiri, dan `observations`/`full_snapshot` di sini SERING objek yang
+    # sama dipakai ulang lintas model (lihat serving/batch_predictor.py) -
+    # kalau kolom RAW ikut ditempelkan di sini, merge survival belakangan
+    # bentrok nama (pandas otomatis jadi `_x`/`_y`, KeyError senyap di jalur
+    # itu). Konversi ke log1p SEGERA di sini dan JANGAN simpan nama RAW-nya.
+    cum = dynamic_history.cumulative_cycle_age(cycles)
+    cum_lookup = cum.set_index("installation_cycle_id")
+    matched = observations["installation_cycle_id"].map(cum_lookup["cumulative_prior_cycle_days"])
+    count_matched = observations["installation_cycle_id"].map(cum_lookup["previous_cycle_count"])
+    trend = dynamic_history.corrective_degradation_trend(observations, events)
+    windowed = dynamic_history.windowed_corrective_extra(observations, events)
+
+    observations["log_cumulative_prior_cycle_days"] = np.log1p(
+        pd.to_numeric(matched, errors="coerce").fillna(0.0).clip(lower=0.0)
+    ).to_numpy()
+    observations["log_previous_cycle_count"] = np.log1p(
+        pd.to_numeric(count_matched, errors="coerce").fillna(0.0)
+    ).to_numpy()
+    observations["has_failure_interval_trend"] = trend["has_failure_interval_trend"].to_numpy()
+    observations["log_failure_interval_mean_days"] = trend["log_failure_interval_mean_days"].to_numpy()
+    observations["failure_interval_trend_ratio"] = trend["failure_interval_trend_ratio"].to_numpy()
+    observations["log_prior_corrective_60d"] = windowed["log_prior_corrective_60d"].to_numpy()
+    observations["log_prior_corrective_90d"] = windowed["log_prior_corrective_90d"].to_numpy()
+    return observations
+
+
 def _at(cumulative: np.ndarray, position: np.ndarray) -> np.ndarray:
     """Nilai kumulatif setelah `position` event; 0 kalau belum ada event."""
     return np.where(position > 0, cumulative[np.maximum(position - 1, 0)], 0)

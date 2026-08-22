@@ -1,4 +1,4 @@
-"""Feature engineering: kolom mentah -> 18 fitur final model failure.
+"""Feature engineering: kolom mentah -> 28 fitur final model failure.
 
 SATU-SATUNYA tempat fitur dihitung. Training dan prediction sama-sama memanggil
 `build_features`, jadi tidak mungkin ada perbedaan antara fitur yang dipelajari
@@ -24,7 +24,7 @@ import pandas as pd
 
 from partrisk import config
 from partrisk.features.fleet import _count_before, attach_fleet, attach_fleet_snapshot, fleet_snapshot
-from partrisk.features.history import _HISTORY_COUNTS, attach_history
+from partrisk.features.history import _HISTORY_COUNTS, attach_degradation_history, attach_history
 from partrisk.features.observations import current_observations, training_observations
 from partrisk.features.support import cumulative_support, part_model_support, support_totals
 from partrisk.features.transforms import _age_band, _log1p
@@ -33,6 +33,7 @@ __all__ = [
     "training_observations",
     "current_observations",
     "attach_history",
+    "attach_degradation_history",
     "attach_fleet",
     "fleet_snapshot",
     "attach_fleet_snapshot",
@@ -104,6 +105,33 @@ def build_features(raw: pd.DataFrame, support: pd.Series) -> pd.DataFrame:
     )
     features["has_previous_cycle"] = raw["has_previous_cycle"].fillna(False).astype(bool)
 
+    # --- Degradasi (dibawa dari model event-based, lihat attach_degradation_history) ---
+    # Terbukti menaikkan ROC-AUC/PR-AUC/Recall&Presisi@kapasitas sekaligus -
+    # reports/degradation_features_experiment.md.
+    # cumulative_prior_cycle_days/previous_cycle_count SUDAH di-log1p oleh
+    # attach_degradation_history() sendiri (BUKAN di sini seperti fitur lain)
+    # - nama RAW-nya sengaja tidak pernah ditempelkan ke observations sama
+    # sekali, lihat komentar di attach_degradation_history().
+    features["log_cumulative_prior_cycle_days"] = pd.to_numeric(
+        raw["log_cumulative_prior_cycle_days"], errors="coerce"
+    ).fillna(0.0)
+    features["log_previous_cycle_count"] = pd.to_numeric(
+        raw["log_previous_cycle_count"], errors="coerce"
+    ).fillna(0.0)
+    features["has_failure_interval_trend"] = raw["has_failure_interval_trend"].fillna(False).astype(bool)
+    features["log_failure_interval_mean_days"] = pd.to_numeric(
+        raw["log_failure_interval_mean_days"], errors="coerce"
+    ).fillna(0.0)
+    features["failure_interval_trend_ratio"] = pd.to_numeric(
+        raw["failure_interval_trend_ratio"], errors="coerce"
+    ).fillna(1.0)
+    features["log_prior_corrective_60d"] = pd.to_numeric(
+        raw["log_prior_corrective_60d"], errors="coerce"
+    ).fillna(0.0)
+    features["log_prior_corrective_90d"] = pd.to_numeric(
+        raw["log_prior_corrective_90d"], errors="coerce"
+    ).fillna(0.0)
+
     # --- Musiman ------------------------------------------------------------
     # Representasi siklik supaya Desember tidak dianggap jauh dari Januari.
     month = pd.to_datetime(raw["observation_on"]).dt.month
@@ -118,7 +146,7 @@ def build_features(raw: pd.DataFrame, support: pd.Series) -> pd.DataFrame:
         features[column] = pd.to_numeric(raw[column], errors="coerce").fillna(0.0)
 
     features[config.CATEGORICAL_FEATURES] = features[config.CATEGORICAL_FEATURES].astype(str)
-    numeric = config.NUMERIC_FEATURES + config.FLEET_FEATURES
+    numeric = config.NUMERIC_FEATURES + config.FLEET_FEATURES + config.DEGRADATION_FEATURES
     features[numeric] = features[numeric].astype(float)
     return features[config.FEATURE_COLUMNS]
 

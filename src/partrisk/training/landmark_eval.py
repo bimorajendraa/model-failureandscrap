@@ -75,6 +75,13 @@ def build_landmark_features_at_observation(
     landmarks = pd.concat([landmarks, transform], axis=1)
 
     landmarks = eb_features.attach_dynamic_extra(landmarks, cycles, events)
+    # compute_features() di bawah memanggil feature_builder.build_features()
+    # sebagai utilitas bersama (reuse kolom classification) - fungsi itu
+    # sekarang juga butuh log_previous_cycle_count (config.DEGRADATION_FEATURES).
+    # attach_dynamic_extra() di atas sudah punya previous_cycle_count RAW
+    # (dipakai survival sendiri, nama BEDA sengaja - lihat
+    # DYNAMIC_EXTRA_NUMERIC_COLUMNS) - tinggal di-log1p, bukan dihitung ulang.
+    landmarks["log_previous_cycle_count"] = np.log1p(landmarks["previous_cycle_count"].astype(float))
 
     # JEBAKAN #2: support DIBEKUKAN dari metadata.json (hasil training),
     # dipetakan persis seperti predict/survival.py - TIDAK dihitung ulang

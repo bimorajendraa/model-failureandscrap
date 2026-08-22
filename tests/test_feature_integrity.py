@@ -50,6 +50,17 @@ def _minimal_failure_raw(n: int = 3) -> pd.DataFrame:
         "log_model_failures_90d": [0.0, 1.0, 0.5][:n],
         "model_failure_rate_90d": [0.0, 0.1, 0.05][:n],
         "log_model_fleet_size": [1.0, 2.0, 1.5][:n],
+        # Fitur degradasi (attach_degradation_history) - lihat config.DEGRADATION_FEATURES.
+        # cumulative_prior_cycle_days/previous_cycle_count SUDAH di-log1p oleh
+        # attach_degradation_history() sendiri (lihat komentarnya) - fixture
+        # ini meniru OUTPUT-nya, bukan nilai mentah.
+        "log_cumulative_prior_cycle_days": [0.0, np.log1p(50.0), 0.0][:n],
+        "log_previous_cycle_count": [0.0, np.log1p(1), 0.0][:n],
+        "has_failure_interval_trend": [False, True, False][:n],
+        "log_failure_interval_mean_days": [0.0, 3.5, 0.0][:n],
+        "failure_interval_trend_ratio": [1.0, 0.8, 1.0][:n],
+        "log_prior_corrective_60d": [0.0, 1.0, 0.0][:n],
+        "log_prior_corrective_90d": [0.0, 1.0, 0.0][:n],
     })
 
 

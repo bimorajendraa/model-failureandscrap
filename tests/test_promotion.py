@@ -177,6 +177,7 @@ def test_evaluate_incumbent_menghasilkan_skor_valid():
 
     observations = feature_builder.training_observations(cycles)
     observations = feature_builder.attach_history(observations, events)
+    observations = feature_builder.attach_degradation_history(observations, cycles, events)
     episodes = data_reader.get_failure_episodes()
     observations = feature_builder.attach_fleet(observations, cycles, episodes)
     eligible = observations.loc[observations["is_eligible"]].reset_index(drop=True)
