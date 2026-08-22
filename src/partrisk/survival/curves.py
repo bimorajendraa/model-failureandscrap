@@ -74,6 +74,60 @@ def step_eval_matrix(times: np.ndarray, curves: np.ndarray, query_times: list[fl
     return result
 
 
+def calibrate_curve(times: np.ndarray, curve_values: np.ndarray, calibrators: dict) -> np.ndarray:
+    """S(t) TERKALIBRASI di SELURUH grid waktu - bukan cuma 4 titik horizon
+    (30/60/90/120) seperti `predict/survival.py::_calibrate_risk()`.
+
+    Dibutuhkan karena `median_survival_time()`/`survival_time_at_threshold()`
+    dipanggil pada SELURUH kurva (S bisa turun ke 0,5/0,9 di titik waktu
+    mana pun, bukan cuma di 4 horizon terlatih) - membaca median dari kurva
+    MENTAH sementara `calibrated_risk_Nd` sudah dari kurva terkalibrasi adalah
+    inkonsistensi (lihat reports/rsf_median_curve_baseline.md &
+    rsf_median_curve_calibration_result.md untuk bukti empirisnya: median
+    mentah bias optimis +751,9 hari, MAE turun ~40-53% setelah kurva penuh
+    dikalibrasi konsisten).
+
+    Metode: raw_risk(t)=1-S(t) dipetakan lewat isotonic per horizon TERLATIH
+    (calibrators, TIDAK dilatih ulang di sini) - interpolasi LINEAR antara
+    dua horizon terdekat untuk t di antaranya, flat-extrapolation calibrator
+    ujung (horizon terkecil/terbesar) di luar rentang terlatih, lalu cummax
+    WAJIB di SELURUH grid (bukan cuma 4 titik) - kalibrasi per-titik tidak
+    menjamin hasil interpolasi tetap monoton walau tiap calibrator sendiri
+    monoton.
+
+    Setiap titik grid masuk TEPAT SATU region setengah-terbuka (h_lo, h_hi] -
+    penting karena grid harian s/d 120 hari HAMPIR PASTI memuat titik yang
+    PERSIS sama dengan horizon terlatih (mis. t=60, t=90); region tertutup-
+    terbuka yang salah (mis. keduanya '<'/'>' ketat) membuat titik itu tidak
+    tercakup region manapun (bug nyata yang sempat ditemukan saat prototyping
+    - lihat assert di bawah, sengaja bukan silent no-op)."""
+    horizons = sorted(calibrators)
+    n_rows, n_grid = curve_values.shape
+    raw_risk = 1.0 - curve_values
+    calibrated_risk = np.full_like(raw_risk, np.nan)
+
+    mask = times <= horizons[0]
+    if mask.any():
+        calibrated_risk[:, mask] = calibrators[horizons[0]].predict(raw_risk[:, mask].ravel()).reshape(n_rows, mask.sum())
+    mask = times > horizons[-1]
+    if mask.any():
+        calibrated_risk[:, mask] = calibrators[horizons[-1]].predict(raw_risk[:, mask].ravel()).reshape(n_rows, mask.sum())
+    for h_lo, h_hi in zip(horizons[:-1], horizons[1:]):
+        mask = (times > h_lo) & (times <= h_hi)
+        if not mask.any():
+            continue
+        t_sub = times[mask]
+        weight = (t_sub - h_lo) / (h_hi - h_lo)
+        sub_raw = raw_risk[:, mask]
+        r_lo = calibrators[h_lo].predict(sub_raw.ravel()).reshape(n_rows, mask.sum())
+        r_hi = calibrators[h_hi].predict(sub_raw.ravel()).reshape(n_rows, mask.sum())
+        calibrated_risk[:, mask] = (1 - weight)[None, :] * r_lo + weight[None, :] * r_hi
+
+    assert not np.isnan(calibrated_risk).any(), "calibrate_curve(): ada titik grid yang tidak tercakup region manapun"
+    calibrated_risk = np.maximum.accumulate(calibrated_risk, axis=1)
+    return 1.0 - calibrated_risk
+
+
 def survival_time_at_threshold(times: np.ndarray, curve: np.ndarray, threshold: float) -> float | None:
     """Umur saat S(t) pertama kali <= threshold, atau None kalau kurva belum
     turun sampai situ dalam rentang follow-up training (tidak diekstrapolasi -

@@ -94,6 +94,30 @@ def test_median_days_to_failure_batch_sama_dengan_single(sample):
                 )
 
 
+def test_survival_kurva_terkalibrasi_monoton_turun_dan_flag_benar(sample):
+    """Fase upgrade RSF, Langkah B: median/p90/kurva sekarang dari kurva
+    TERKALIBRASI (curves.calibrate_curve()), bukan kurva mentah lagi - lihat
+    reports/rsf_median_curve_calibration_result.md. curve_is_calibrated harus
+    True kalau calibrators.joblib ada (artifact production sekarang selalu
+    punya file ini sejak Fase A3), dan kurva yang dikembalikan harus tetap
+    S(t) valid (monoton turun, dalam [0,1]) - kalibrasi per-titik + interpolasi
+    TIDAK boleh merusak properti dasar kurva survival."""
+    try:
+        predict_survival.load_model()
+    except FileNotFoundError:
+        pytest.skip("model survival belum dilatih (survival_model/event_based/artifacts/)")
+
+    for _, row in sample.iterrows():
+        result = predict_survival.predict(row["item_id"])
+        assert result["curve_is_calibrated"] is True
+        curve = result["estimated_survival_curve_from_now"]
+        if not curve:
+            continue
+        probs = [point["survival_probability"] for point in curve]
+        assert all(0.0 - 1e-9 <= p <= 1.0 + 1e-9 for p in probs)
+        assert all(a >= b - 1e-9 for a, b in zip(probs, probs[1:]))
+
+
 def test_survival_calibrated_risk_monoton_naik(sample):
     """Fase R1 upgrade RSF: risk per horizon dikalibrasi isotonic SENDIRI-
     SENDIRI per horizon (fit_calibrators()), yang BISA saling silang walau

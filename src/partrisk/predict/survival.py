@@ -216,6 +216,12 @@ def predict(item_id: str) -> dict:
 
     times_grid, curve_values = curves.survival_curve_arrays(model, x)
     curve = curve_values[0]
+    # Kurva TERKALIBRASI (Fase upgrade RSF, Langkah B - lihat
+    # curves.calibrate_curve() docstring & reports/rsf_median_curve_calibration_result.md)
+    # dipakai untuk SEMUA turunan waktu (median/p90/kurva ditampilkan) supaya
+    # konsisten dengan calibrated_risk_Nd di bawah - BUKAN kurva mentah lagi.
+    # Fallback ke kurva mentah kalau calibrators None (artifact sangat lama).
+    curve_calibrated = curves.calibrate_curve(times_grid, curve_values, calibrators)[0] if calibrators is not None else curve
 
     # t=0 kurva ini SUDAH "sekarang" (lihat docstring modul) - risk_Nd =
     # 1-S(N) LANGSUNG, tidak perlu dibagi S(age) seperti model baseline-instalasi.
@@ -234,18 +240,18 @@ def predict(item_id: str) -> dict:
     # tetap eksplisit lewat nama field, bukan ditimpa diam-diam.
     calibrated = _calibrate_risk(raw_risk, calibrators)
     calibrated_risk = {f"calibrated_risk_{h}d": calibrated[h] for h in HORIZONS_DAYS}
-    median_days_remaining = curves.median_survival_time(times_grid, curve)
+    median_days_remaining = curves.median_survival_time(times_grid, curve_calibrated)
     # median SERING None (kebanyakan PART aktif belum cukup lama untuk S(t)
-    # turun sampai separuh dalam rentang follow-up training - diukur lewat
-    # score_batch(): 5,3% dari populasi aktif) - ambang 90% jauh lebih sering
-    # tercapai dan tetap actionable, lihat survival.curves docstring.
-    days_until_90pct_remaining = curves.survival_time_at_threshold(times_grid, curve, 0.9)
+    # turun sampai separuh dalam rentang follow-up training) - ambang 90%
+    # jauh lebih sering tercapai dan tetap actionable, lihat survival.curves
+    # docstring. % null diukur di reports/rsf_median_curve_baseline.md.
+    days_until_90pct_remaining = curves.survival_time_at_threshold(times_grid, curve_calibrated, 0.9)
 
     curve_days = list(range(0, int(min(times_grid.max(), CURVE_MAX_DAYS)) + 1, CURVE_STEP_DAYS))
     curve_points = [
         {
             "days_from_now": d,
-            "survival_probability": round(curves.eval_survival_at(times_grid, curve, d), 4),
+            "survival_probability": round(curves.eval_survival_at(times_grid, curve_calibrated, d), 4),
         }
         for d in curve_days
     ]
@@ -264,6 +270,7 @@ def predict(item_id: str) -> dict:
             round(days_until_90pct_remaining, 1) if days_until_90pct_remaining is not None else None
         ),
         "estimated_survival_curve_from_now": curve_points,
+        "curve_is_calibrated": calibrators is not None,
         "model_name": model_name,
         "note": (
             "Fitur dihitung pada KONDISI SEKARANG (observation_on=as_of), TERMASUK riwayat/armada "
@@ -275,7 +282,7 @@ def predict(item_id: str) -> dict:
 
 def score_batch(
     rows: pd.DataFrame, events: pd.DataFrame, cycles: pd.DataFrame, episodes: pd.DataFrame,
-    terminal_raw: pd.DataFrame, model, encoder, metadata: dict,
+    terminal_raw: pd.DataFrame, model, encoder, metadata: dict, calibrators=None,
 ) -> pd.DataFrame:
     """`median_days_to_failure` untuk BANYAK PART aktif sekaligus - field
     advisory dipakai `serving/batch_predictor.py` (mode aditif, TIDAK
@@ -293,7 +300,11 @@ def score_batch(
 
     Kurva penuh SENGAJA tidak disertakan di sini (payload batch akan melipat
     puluhan kali untuk field yang jarang dibutuhkan di daftar prioritas -
-    kurva penuh tetap eksklusif endpoint satu PART lewat `predict()`)."""
+    kurva penuh tetap eksklusif endpoint satu PART lewat `predict()`).
+
+    `calibrators` (opsional, dari `load_model()`) - kalau ada, median/p90
+    dibaca dari kurva TERKALIBRASI (`curves.calibrate_curve()`), KONSISTEN
+    dengan `predict()` (lihat komentar di sana) - bukan kurva mentah."""
     feature_frame = landmark_eval.build_landmark_features_at_observation(
         rows, events, cycles, episodes, terminal_raw, metadata
     )
@@ -306,12 +317,13 @@ def score_batch(
         chunk = feature_frame.iloc[lo:hi]
         x_chunk = features.encode(chunk, encoder)
         times_grid, curve_values = curves.survival_curve_arrays(model, x_chunk)
-        for k in range(curve_values.shape[0]):
-            median = curves.median_survival_time(times_grid, curve_values[k])
+        curve_values_used = curves.calibrate_curve(times_grid, curve_values, calibrators) if calibrators is not None else curve_values
+        for k in range(curve_values_used.shape[0]):
+            median = curves.median_survival_time(times_grid, curve_values_used[k])
             median_days[lo + k] = np.nan if median is None else median
-            at_90pct = curves.survival_time_at_threshold(times_grid, curve_values[k], 0.9)
+            at_90pct = curves.survival_time_at_threshold(times_grid, curve_values_used[k], 0.9)
             days_until_90pct[lo + k] = np.nan if at_90pct is None else at_90pct
-        del curve_values
+        del curve_values, curve_values_used
 
     return pd.DataFrame({
         "item_id": rows["item_identifier_clean"].to_numpy(),
