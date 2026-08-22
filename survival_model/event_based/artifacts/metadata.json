@@ -204,7 +204,7 @@
       120
     ],
     "cummax_required": true,
-    "applied_to_advisory_fields": false
+    "applied_to_advisory_fields": true
   },
   "evaluation_metrics_full_landmark_rows": {
     "random_survival_forest": {

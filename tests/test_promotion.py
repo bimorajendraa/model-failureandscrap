@@ -25,6 +25,7 @@ import numpy as np
 import pytest
 
 from partrisk.training import failure_classification as train
+from partrisk.training import failure_survival
 from partrisk.training import versioning as training_utils
 from tests.conftest import needs_database, needs_models
 
@@ -153,6 +154,62 @@ def test_kandidat_dan_incumbent_identik_dipromosikan():
     same = _metrics()
     promote, reason, comparison = training_utils.decide_promotion(same, dict(same), "v1", force=False)
     assert promote is True
+
+
+# ---------------------------------------------------------------------------
+# decide_survival_promotion() - gate RINGAN Fase R3 upgrade RSF (advisory,
+# tidak mengatur ranking - jadi Brier@30/90 saja, BUKAN dual-gate PR-AUC/
+# Recall ala decide_promotion di atas).
+# ---------------------------------------------------------------------------
+
+
+def _survival_metrics(brier_30: float, brier_90: float, key_type=int) -> dict:
+    return {"brier_at_horizon": {key_type(30): brier_30, key_type(90): brier_90}}
+
+
+def test_survival_promosi_pertama_kali_selalu_lolos():
+    approved, reason = failure_survival.decide_survival_promotion(_survival_metrics(0.05, 0.05), None)
+    assert approved is True
+    assert "belum ada" in reason
+
+
+def test_survival_kandidat_lebih_baik_di_kedua_horizon_dipromosikan():
+    candidate = _survival_metrics(0.04, 0.04)
+    incumbent = _survival_metrics(0.05, 0.05)
+    approved, reason = failure_survival.decide_survival_promotion(candidate, incumbent)
+    assert approved is True
+
+
+def test_survival_brier_30d_memburuk_menahan_promosi_walau_90d_membaik():
+    candidate = _survival_metrics(0.06, 0.03)
+    incumbent = _survival_metrics(0.05, 0.05)
+    approved, reason = failure_survival.decide_survival_promotion(candidate, incumbent)
+    assert approved is False
+
+
+def test_survival_brier_90d_memburuk_menahan_promosi_walau_30d_membaik():
+    candidate = _survival_metrics(0.03, 0.06)
+    incumbent = _survival_metrics(0.05, 0.05)
+    approved, reason = failure_survival.decide_survival_promotion(candidate, incumbent)
+    assert approved is False
+
+
+def test_survival_kandidat_dan_incumbent_identik_dipromosikan():
+    same = _survival_metrics(0.05, 0.05)
+    approved, reason = failure_survival.decide_survival_promotion(same, dict(same))
+    assert approved is True
+
+
+def test_survival_incumbent_dari_metadata_json_kunci_string_tetap_terbaca():
+    """metadata.json hasil json.load punya kunci horizon berupa STRING
+    ("30"/"90"), bukan int seperti hasil live model_fit.evaluate_models() -
+    decide_survival_promotion() harus menormalkan keduanya, bukan gagal diam-diam
+    (mis. KeyError tertangkap jadi None lalu perbandingan salah)."""
+    candidate = _survival_metrics(0.04, 0.04, key_type=int)
+    incumbent = _survival_metrics(0.05, 0.05, key_type=str)
+    approved, reason = failure_survival.decide_survival_promotion(candidate, incumbent)
+    assert approved is True
+    assert "0.0400" in reason and "0.0500" in reason
 
 
 # ---------------------------------------------------------------------------

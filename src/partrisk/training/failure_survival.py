@@ -36,6 +36,19 @@ Mode ADITIF (lihat gate_decision.md) - model ini TIDAK menggantikan CatBoost.
 ARTIFACTS_DIR masih menunjuk artifact riset (survival_model/event_based/artifacts/),
 BUKAN models/failure/v3/ - tidak ada mekanisme cutover/rollback yang perlu
 dibangun untuk field advisory saja.
+
+Kebijakan retrain (Fase R3 upgrade RSF, reports/rsf_r1_evaluation.md dkk):
+model ini ADVISORY - tidak mengatur ranking/urutan inspeksi (itu tetap CatBoost),
+jadi TIDAK perlu retrain tiap minggu seperti CatBoost. Retrain wajar: bulanan,
+atau kapan pun `data_end` (lihat metadata.json) sudah bergeser jauh (mis. >60
+hari) dari training terakhir. Retrain LEBIH SERING tidak salah, hanya tidak perlu.
+
+Gate promosi (R3, ringan - BUKAN dual-gate PR-AUC/Recall seperti CatBoost
+`decide_promotion`, karena model ini tidak dipakai untuk ranking): artifact
+kandidat HANYA menggantikan artifact production kalau Brier@30d DAN Brier@90d
+TEST tidak memburuk dibanding artifact yang sudah ada (`decide_survival_promotion()`
+di bawah). Kalau gagal, artifact LAMA tetap dipakai - training TIDAK
+menimpa file secara diam-diam.
 """
 
 from __future__ import annotations
@@ -116,6 +129,35 @@ def fit_calibrators(model, x_val, val_duration: np.ndarray, val_event: np.ndarra
     return calibrators
 
 
+def decide_survival_promotion(candidate_test_metrics: dict, incumbent_test_metrics: dict | None) -> tuple[bool, str]:
+    """Gate RINGAN Fase R3 - model ini advisory (tidak mengatur ranking), jadi
+    BUKAN dual-gate PR-AUC/Recall ala `training.versioning.decide_promotion`.
+    Kandidat menang HANYA kalau Brier@30d DAN Brier@90d TEST tidak memburuk
+    dibanding artifact production sekarang - dua horizon itu yang paling
+    relevan untuk field advisory (risk_30d/90d, median/90pct sisa umur).
+
+    `candidate_test_metrics`/`incumbent_test_metrics` = `metrics["random_survival_forest"]["test"]`
+    dari `model_fit.evaluate_models()` (native_metrics - kunci brier_at_horizon
+    dict[int,float]) atau, untuk incumbent lama, `metadata.json` hasil json.load
+    (kunci brier_at_horizon dict[str,float] - dinormalkan ke int di bawah)."""
+    if incumbent_test_metrics is None:
+        return True, "belum ada artifact production sebelumnya"
+
+    def brier(metrics: dict, horizon: int) -> float:
+        table = metrics["brier_at_horizon"]
+        return float(table.get(horizon, table.get(str(horizon))))
+
+    b30_candidate, b30_incumbent = brier(candidate_test_metrics, 30), brier(incumbent_test_metrics, 30)
+    b90_candidate, b90_incumbent = brier(candidate_test_metrics, 90), brier(incumbent_test_metrics, 90)
+    reason = (
+        f"Brier@30d {b30_candidate:.4f} vs incumbent {b30_incumbent:.4f} | "
+        f"Brier@90d {b90_candidate:.4f} vs incumbent {b90_incumbent:.4f}"
+    )
+    if b30_candidate <= b30_incumbent and b90_candidate <= b90_incumbent:
+        return True, reason
+    return False, reason
+
+
 def main() -> int:
     print("[1/5] Menyusun dataset event-based (baca database, landmark)...")
     built = build_dataset.build()
@@ -163,6 +205,20 @@ def main() -> int:
     for h, calibrator in calibrators.items():
         print(f"      horizon={h}d - {len(calibrator.X_thresholds_)} titik kalibrasi")
 
+    print("[Gate R3] Membandingkan kandidat dengan artifact production (kalau ada)...")
+    incumbent_metadata_path = ARTIFACTS_DIR / "metadata.json"
+    incumbent_test_metrics = None
+    if incumbent_metadata_path.exists():
+        incumbent_metadata = json.loads(incumbent_metadata_path.read_text(encoding="utf-8"))
+        incumbent_test_metrics = incumbent_metadata["evaluation_metrics_full_landmark_rows"]["random_survival_forest"]["test"]
+    approved, gate_reason = decide_survival_promotion(metrics["random_survival_forest"]["test"], incumbent_test_metrics)
+    print(f"      {gate_reason}")
+    if not approved:
+        print("      DITOLAK - Brier@30d/90d TEST memburuk dibanding artifact production sekarang.")
+        print("      Artifact TIDAK ditimpa - artifact lama tetap dipakai serving.")
+        return 1
+    print("      DITERIMA - artifact production akan ditimpa.")
+
     print("[5/5] Menyimpan artifacts...")
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     joblib.dump(models, ARTIFACTS_DIR / "models.joblib")
@@ -206,7 +262,10 @@ def main() -> int:
             "(event<=horizon=1, survived-to-horizon=0, censored-before-horizon excluded)",
             "horizons_days": CALIBRATION_HORIZONS_DAYS,
             "cummax_required": True,
-            "applied_to_advisory_fields": False,
+            # Fase R1 upgrade RSF (commit be83a03): predict/survival.py
+            # SEKARANG memakai calibrators.joblib untuk calibrated_risk_*d -
+            # lihat _calibrate_risk(). Dulu False (dilatih tapi belum dipakai).
+            "applied_to_advisory_fields": True,
         },
         "evaluation_metrics_full_landmark_rows": metrics,
     }
